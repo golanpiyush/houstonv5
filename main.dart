@@ -5,6 +5,8 @@ import 'Services/AudioProvider.dart';
 import 'screens/searchScreen.dart';
 import '../Services/downloadProgress.dart'; // Make sure this import is correct
 import 'package:just_audio_background/just_audio_background.dart';
+import '../Screens/miniplayer.dart'; // Import your mini player widget
+// Import your player screen
 
 Future<void> main() async {
   // Ensure that all bindings are initialized
@@ -21,8 +23,7 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AudioProvider()),
-        ChangeNotifierProvider(
-            create: (_) => StorageService()), // Add this line
+        ChangeNotifierProvider(create: (_) => StorageService()),
       ],
       child: const MyApp(),
     ),
@@ -44,31 +45,40 @@ class MyApp extends StatelessWidget {
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
-
   @override
   Widget build(BuildContext context) {
-    final storageService =
-        Provider.of<StorageService>(context); // Listen to StorageService
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Music Streaming App'),
-      ),
-      body: Stack(
-        children: [
-          const SongSearchScreen(), // Main content
-
-          // Add the DownloadProgressBar
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0, // Position at the bottom of the screen
-            child: DownloadProgressBar(
-              progress: storageService.downloadProgress,
-              isDownloading: storageService.isDownloading,
-            ),
-          ),
-        ],
+      // No AppBar included
+      body: Consumer<StorageService>(
+        builder: (context, storageService, child) {
+          print(
+              'Rebuilding MainScreen, isDownloading: ${storageService.isDownloading}');
+          return Stack(
+            children: [
+              const SongSearchScreen(),
+              DownloadProgressWidget(
+                  progressStream:
+                      storageService.progressStream), // Pass the stream here
+              // Add the mini player here
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Consumer<AudioProvider>(
+                  // Consumer to listen to audio state
+                  builder: (context, audioProvider, child) {
+                    // Check if we are on the player screen
+                    final isPlayerScreen = audioProvider.isPlayerScreenVisible;
+                    return Visibility(
+                      visible: !isPlayerScreen,
+                      child: MiniPlayer(), // Your MiniPlayer widget
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

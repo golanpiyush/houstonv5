@@ -3,24 +3,41 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
+import 'dart:async'; // Import this for StreamController
 
 class StorageService extends ChangeNotifier {
   final Dio _dio = Dio();
-  bool _isDownloading = false;
+  bool _isDownloading = true;
+  bool _isPlayerScreenVisible =
+      false; // Track the visibility of the player screen
+
+  // Getter to access the visibility property
+  bool get isPlayerScreenVisible => _isPlayerScreenVisible;
   double _downloadProgress = 0.0;
   CancelToken? _cancelToken; // Add this line
+  final StreamController<double> _progressController =
+      StreamController<double>.broadcast();
 
   static const String _likedSongsKey = 'liked_songs';
 
   // Getters for download state
   bool get isDownloading => _isDownloading;
   double get downloadProgress => _downloadProgress;
+  Stream<double> get progressStream => _progressController.stream;
 
   // Generate a unique ID for file names
   String get _uniqueId => DateTime.now().millisecondsSinceEpoch.toString();
 
+  void setPlayerScreenVisible(bool isVisible) {
+    _isPlayerScreenVisible = isVisible;
+    notifyListeners();
+  }
+
   void _updateProgress(double progress) {
     _downloadProgress = progress;
+    _progressController.add(progress); // Emit the new progress
+
+    debugPrint('Progress updated: $_downloadProgress');
     notifyListeners();
   }
 
@@ -44,6 +61,7 @@ class StorageService extends ChangeNotifier {
             onProgress(progress);
           }
         },
+        cancelToken: _cancelToken, // Enable canceling
       );
 
       return filePath;
@@ -119,7 +137,7 @@ class StorageService extends ChangeNotifier {
     return songDetails;
   }
 
-  // Method to handle song like and download
+  // Method to handle song like and download with progress
   Future<void> likeSong({
     required String title,
     required String artist,
@@ -128,11 +146,12 @@ class StorageService extends ChangeNotifier {
   }) async {
     try {
       if (await isSongLiked(title, artist)) return;
-      _cancelToken = CancelToken();
 
+      _cancelToken = CancelToken();
       _isDownloading = true;
       _downloadProgress = 0.0;
       notifyListeners();
+      debugPrint('Download started, isDownloading: $_isDownloading');
 
       String sanitizedTitle = title.replaceAll(RegExp(r'[^\w\s]+'), '');
       String sanitizedArtist = artist.replaceAll(RegExp(r'[^\w\s]+'), '');
@@ -144,7 +163,7 @@ class StorageService extends ChangeNotifier {
         await songDir.create(recursive: true);
       }
 
-      // Download audio and album art concurrently
+      // Download audio and album art concurrently with progress updates
       final downloadResults = await Future.wait([
         downloadFile(
           audioUrl,
@@ -166,18 +185,29 @@ class StorageService extends ChangeNotifier {
       );
 
       await addToLikedSongs(title, artist);
-      _isDownloading = false; // Reset the download state
-      notifyListeners();
     } catch (e) {
       debugPrint('Error downloading song: $e');
       rethrow;
     } finally {
-      _isDownloading = false;
-      _downloadProgress = 0.0;
-      _cancelToken = null; // Reset the cancel token
-
+      completeDownload();
       notifyListeners();
+      debugPrint('Download ended, isDownloading: $_isDownloading');
     }
+  }
+
+  // Set initial state when starting a download
+  void startDownload() {
+    _isDownloading = true;
+    _downloadProgress = 0.0;
+    notifyListeners();
+  }
+
+  // Reset download state and notify listeners
+  void completeDownload() {
+    _isDownloading = false;
+    _downloadProgress = 0.0;
+    _cancelToken = null;
+    notifyListeners();
   }
 
   // New method to cancel the download
@@ -234,5 +264,11 @@ class StorageService extends ChangeNotifier {
 
     // Remove song details from SharedPreferences
     await prefs.remove(songIdentifier);
+  }
+
+  @override
+  void dispose() {
+    _progressController.close();
+    super.dispose();
   }
 }

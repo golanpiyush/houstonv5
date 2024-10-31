@@ -132,8 +132,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                     alignment: Alignment.center,
                     children: [
                       Container(
-                          width: 320,
-                          height: 320,
+                          width: 340,
+                          height: 340,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: [
@@ -165,8 +165,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       FadeTransition(
                         opacity: _fadeAnimation,
                         child: Container(
-                          width: 320,
-                          height: 320,
+                          width: 340,
+                          height: 340,
                           decoration: BoxDecoration(
                             color: Colors.black
                                 .withOpacity(0.9), // Low light filter
@@ -221,7 +221,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   onChanged: (value) {
                     audioProvider.seekTo(Duration(milliseconds: value.toInt()));
                   },
-                  activeColor: Colors.white,
+                  activeColor: vibrantColor,
                   inactiveColor: Colors.white30,
                 ),
                 const SizedBox(height: 0),
@@ -318,7 +318,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       icon: Icon(
                         isPlaying ? Icons.pause : Icons.play_arrow,
                       ),
-                      color: Colors.white,
+                      color: vibrantColor,
                       iconSize: 50,
                       onPressed: () async {
                         await audioProvider.togglePlayPause();

@@ -1,39 +1,102 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 
-class DownloadProgressBar extends StatelessWidget {
-  final double progress;
-  final bool isDownloading;
+class DownloadProgressWidget extends StatefulWidget {
+  final Stream<double> progressStream;
 
-  const DownloadProgressBar({
-    super.key,
-    required this.progress,
-    required this.isDownloading,
-  });
+  const DownloadProgressWidget({Key? key, required this.progressStream})
+      : super(key: key);
+
+  @override
+  _DownloadProgressWidgetState createState() => _DownloadProgressWidgetState();
+}
+
+class _DownloadProgressWidgetState extends State<DownloadProgressWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+  bool _visible = false;
+  double _progress = 0.0;
+  late StreamSubscription<double> _progressSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+
+    _progressSubscription = widget.progressStream.listen((progress) {
+      if (mounted) {
+        setState(() {
+          _progress = progress;
+          print('Current progress: $progress'); // Debug output
+        });
+
+        if (progress > 0.0) {
+          if (!_visible) {
+            setState(() {
+              _visible = true; // Show if progress starts
+            });
+            _animationController.forward();
+          }
+        } else if (progress >= 1.0) {
+          if (_visible) {
+            _visible = false; // Hide after completion
+
+            _animationController.reverse().then((_) {
+              if (mounted) {
+                setState(() {
+                  _visible = false; // Hide when complete
+                });
+              }
+            });
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _progressSubscription.cancel(); // Cancel subscription to avoid memory leaks
+    _animationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (!isDownloading) return const SizedBox.shrink();
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        LinearProgressIndicator(
-          value: progress,
-          backgroundColor: Colors.red[200], // Light red background
-          valueColor: const AlwaysStoppedAnimation<Color>(
-            Colors.red, // Red color for the progress bar
+    print('Download Progress Widget - visible: $_visible');
+    return Positioned(
+      bottom: 20,
+      left: 20,
+      right: 20,
+      child: Visibility(
+        visible: _visible,
+        child: ScaleTransition(
+          scale: _scaleAnimation,
+          child: Container(
+            height: 4,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              color: Color.fromARGB(83, 93, 14, 241),
+            ),
+            child: LinearProgressIndicator(
+              value: _progress,
+              backgroundColor: Colors.transparent,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  Color.fromARGB(226, 45, 7, 212)),
+            ),
           ),
-          minHeight: 24,
         ),
-        const SizedBox(height: 4),
-        Text(
-          '${(progress * 100).toStringAsFixed(1)}%',
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
-              ?.copyWith(color: Colors.red), // Red text color
-        ),
-      ],
+      ),
     );
   }
 }

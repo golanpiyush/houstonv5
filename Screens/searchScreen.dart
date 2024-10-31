@@ -22,11 +22,11 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
 
   String greetingMessage() {
     final hour = DateTime.now().hour;
-    if (hour < 12) {
+    if (hour < 11) {
       return 'Good Morning, Piyush';
-    } else if (hour < 17) {
+    } else if (hour < 18) {
       return 'Good Afternoon, Piyush';
-    } else if (hour < 20) {
+    } else if (hour < 21) {
       return 'Good Evening, Piyush';
     } else {
       return 'Good Night, Piyush';

@@ -9,6 +9,9 @@ class AudioProvider with ChangeNotifier {
   bool isPlaying = false;
   bool isMiniPlayer = false;
   // bool _isInitialized = false;
+  bool _isPlayerScreenVisible = false;
+
+  bool get isPlayerScreenVisible => _isPlayerScreenVisible;
 
   StreamSubscription<Duration>? _positionSubscription;
 
@@ -25,6 +28,7 @@ class AudioProvider with ChangeNotifier {
   String? currentSongTitle;
   String? currentArtist;
   String? currentAlbumArtUrl;
+  String? currentPlayingSongKey;
 
   // Public getter for the audio player position
   Duration position = Duration.zero;
@@ -39,7 +43,14 @@ class AudioProvider with ChangeNotifier {
     currentAlbumArtUrl = songDetails.albumArt;
     currentAudioUrl = songDetails.audioUrl;
 
+    currentPlayingSongKey = "${songDetails.artists}-${songDetails.title}";
+
     // Notify listeners about the change
+    notifyListeners();
+  }
+
+  void setPlayerScreenVisible(bool isVisible) {
+    _isPlayerScreenVisible = isVisible;
     notifyListeners();
   }
 
@@ -56,62 +67,69 @@ class AudioProvider with ChangeNotifier {
     _audioPlayer.seek(position);
   }
 
-  // Method to initialize and play a new song with MediaItem tag
+  MediaItem? _currentMediaItem;
+
   Future<void> playSong(String audioUrl, String albumArtPath) async {
     try {
       debugPrint("Attempting to play song: $audioUrl");
 
-      // Check if the audioUrl is a local file or a remote URL
-      if (audioUrl.startsWith('file://')) {
-        print("Playing song from local file.");
-      } else if (audioUrl.startsWith('http://') ||
-          audioUrl.startsWith('https://')) {
-        print("Playing song from URL.");
-      } else {
-        print("Unknown audio source.");
+      String newTitle = currentSongTitle ?? "Unknown Title";
+      String newArtist = currentArtist ?? "Unknown Artist";
+
+      // Check if we're trying to play the same song
+      if (_currentMediaItem != null &&
+          _currentMediaItem!.title == newTitle &&
+          _currentMediaItem!.album == newArtist) {
+        // Same song, just resume playback if not already playing
+        if (!isPlaying) {
+          await _audioPlayer.play();
+          isPlaying = true;
+          notifyListeners();
+        }
+        return;
       }
+
+      // If we reach here, it's a different song, so initialize new audio source
 
       // Prepare the artUri
       Uri? artUri;
-
-      // Check if the albumArtPath is a valid URL first
       if (albumArtPath.isNotEmpty) {
-        // Try URL first
         if (albumArtPath.startsWith('http://') ||
             albumArtPath.startsWith('https://')) {
           artUri = Uri.parse(albumArtPath);
         } else if (albumArtPath.startsWith('file://')) {
           artUri = Uri.parse(albumArtPath);
         } else {
-          // Assuming the albumArtPath could be a local file without 'file://' prefix
           artUri = Uri.file(albumArtPath);
         }
       }
 
-      // If the parsed URI is not valid, log a message
+      // Validate artUri
       if (artUri == null || artUri.hasScheme == false) {
         debugPrint("Invalid artUri: $albumArtPath");
-        artUri = null; // Fall back to null if invalid
+        artUri = null;
       }
 
-      // Set up the audio source with a MediaItem tag for background capabilities
+      // Create new MediaItem
+      _currentMediaItem = MediaItem(
+        id: '1',
+        album: newArtist,
+        title: newTitle,
+        artUri: artUri,
+      );
+
+      // Set up the new audio source
       await _audioPlayer.setAudioSource(
         AudioSource.uri(
           Uri.parse(audioUrl),
-          tag: MediaItem(
-            id: '1', // Ensure a unique ID per track
-            album: currentArtist ?? "Unknown Artist",
-            title: currentSongTitle ?? "Unknown Title",
-            artUri: artUri, // Set the validated artUri
-          ),
+          tag: _currentMediaItem,
         ),
       );
 
       await _audioPlayer.play();
       isPlaying = true;
-      notifyListeners(); // Notify listeners to update UI
+      notifyListeners();
 
-      // Start the position listener for real-time updates
       _initializePositionListener();
     } catch (e) {
       debugPrint("Error playing audio: $e");

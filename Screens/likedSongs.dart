@@ -54,7 +54,6 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
     final songDetails = SongDetails(
       title: songData['title'] ?? '',
       artists: songData['artist'] ?? '',
-      album: '', // You might want to store this in StorageService if needed
       duration: '', // You might want to store this in StorageService if needed
       albumArt: songData['albumArtPath'] ?? '',
       audioUrl: songData['audioPath'] ?? '',
