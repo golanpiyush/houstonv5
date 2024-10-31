@@ -6,7 +6,8 @@ import 'SongDetails.dart';
 class MusicApiService {
   final String baseUrl;
   final int maxRetries = 3; // Max retry attempts for network requests
-  final Duration timeoutDuration = Duration(seconds: 5); // Request timeout
+  final Duration timeoutDuration =
+      const Duration(seconds: 5); // Request timeout
 
   // In-memory cache for song details
   // final Map<String, SongDetails> _cache = {};

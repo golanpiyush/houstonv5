@@ -3,13 +3,14 @@ import 'package:provider/provider.dart';
 import '../Services/PaletteGeneratorService.dart';
 import '../Services/AudioProvider.dart';
 import '../Services/SongDetails.dart';
-import 'package:google_fonts/google_fonts.dart'; // Import GoogleFonts
+import 'package:google_fonts/google_fonts.dart';
 import '../Services/StorageService.dart';
+import 'dart:io';
 
 class PlayerScreen extends StatefulWidget {
   final SongDetails songDetails;
 
-  const PlayerScreen({Key? key, required this.songDetails}) : super(key: key);
+  const PlayerScreen({super.key, required this.songDetails});
 
   @override
   _PlayerScreenState createState() => _PlayerScreenState();
@@ -18,13 +19,14 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen>
     with SingleTickerProviderStateMixin {
   Color? vibrantColor;
-  // bool _isLoading = false;
   bool isFavorite = false; // Variable to track favorite state
-
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   bool _isControllerInitialized =
       false; // Flag to track controller initialization
+  // double _progress = 0.0;
+  double downloadProgress = 0.0;
+
   final StorageService _storageService = StorageService();
 
   @override
@@ -74,17 +76,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     super.didChangeDependencies();
     final audioProvider = Provider.of<AudioProvider>(context, listen: false);
 
-    audioProvider.setCurrentSongDetails(widget.songDetails);
-    audioProvider.currentSongTitle = widget.songDetails.title;
-    audioProvider.currentArtist = widget.songDetails.artists;
-    audioProvider.currentAlbumArtUrl = widget.songDetails.albumArt;
-    audioProvider.currentAudioUrl = widget.songDetails.audioUrl;
+    // Wrap state changes in addPostFrameCallback to avoid build phase errors
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      audioProvider.setCurrentSongDetails(widget.songDetails);
+      audioProvider.currentSongTitle = widget.songDetails.title;
+      audioProvider.currentArtist = widget.songDetails.artists;
+      audioProvider.currentAlbumArtUrl = widget.songDetails.albumArt;
+      audioProvider.currentAudioUrl = widget.songDetails.audioUrl;
 
-    if (widget.songDetails.audioUrl.isNotEmpty) {
-      audioProvider.playSong(widget.songDetails.audioUrl);
-    }
+      // Ensure both audioUrl and albumArt are provided
+      if (widget.songDetails.audioUrl.isNotEmpty &&
+          widget.songDetails.albumArt.isNotEmpty) {
+        audioProvider.playSong(
+            widget.songDetails.audioUrl, widget.songDetails.albumArt);
+      }
 
-    _loadVibrantColor(widget.songDetails.albumArt);
+      _loadVibrantColor(widget.songDetails.albumArt);
+    });
   }
 
   @override
@@ -110,55 +118,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             elevation: 0,
             title: Text(audioProvider.currentSongTitle ?? "Unknown Title"),
             centerTitle: true,
-            actions: [
-              IconButton(
-                icon: Icon(
-                  isFavorite ? Icons.favorite : Icons.favorite_border,
-                ),
-                color: isFavorite ? vibrantColor ?? Colors.white : Colors.white,
-                iconSize: 30,
-                onPressed: () async {
-                  setState(() {
-                    isFavorite = !isFavorite; // Toggle favorite state
-                  });
-
-                  // If it's marked as favorite, save the song details locally
-                  if (isFavorite) {
-                    try {
-                      await _storageService.likeSong(
-                        title: widget.songDetails.title,
-                        artist: widget.songDetails.artists,
-                        albumArtUrl: widget.songDetails.albumArt,
-                        audioUrl: widget.songDetails.audioUrl,
-                      );
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Added to favorites!')),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error saving song: $e')),
-                      );
-                    }
-                  } else {
-                    // If it's unmarked as favorite, remove it
-                    try {
-                      await _storageService.unlikeSong(
-                        widget.songDetails.title,
-                        widget.songDetails.artists,
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Removed from favorites!')),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error removing song: $e')),
-                      );
-                    }
-                  }
-                },
-              ),
-            ],
+            actions: const [],
           ),
           body: Center(
             child: Column(
@@ -172,25 +132,35 @@ class _PlayerScreenState extends State<PlayerScreen>
                     alignment: Alignment.center,
                     children: [
                       Container(
-                        width: 320,
-                        height: 320,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: vibrantColor?.withOpacity(0.7) ??
-                                  Colors.black45,
-                              blurRadius: 20,
-                              offset: Offset(5, 5),
+                          width: 320,
+                          height: 320,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: vibrantColor?.withOpacity(0.7) ??
+                                    Colors.black45,
+                                blurRadius: 20,
+                                offset: const Offset(5, 5),
+                              ),
+                            ],
+                            image: DecorationImage(
+                              image: audioProvider.currentAlbumArtUrl != null &&
+                                      audioProvider
+                                          .currentAlbumArtUrl!.isNotEmpty
+                                  ? (Uri.tryParse(audioProvider
+                                                  .currentAlbumArtUrl!)
+                                              ?.hasScheme ??
+                                          false
+                                      ? NetworkImage(audioProvider
+                                          .currentAlbumArtUrl!) // Use network image if valid URL
+                                      : FileImage(File(audioProvider
+                                          .currentAlbumArtUrl!))) // Fallback to local file
+                                  : const AssetImage(
+                                      'assets/images/default_album_art.jpg'), // Fallback to default asset if both are invalid
+                              fit: BoxFit.cover,
                             ),
-                          ],
-                          image: DecorationImage(
-                            image: NetworkImage(
-                                audioProvider.currentAlbumArtUrl ?? ""),
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
+                          )),
                       // Low-light filter overlay with fade animation
                       FadeTransition(
                         opacity: _fadeAnimation,
@@ -207,9 +177,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 30),
-
                 // Song Title and Artist
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -219,7 +187,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           audioProvider.currentSongTitle ?? "Unknown Title"),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 24,
                         fontFamily: 'Jost',
@@ -237,13 +205,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                           audioProvider.currentArtist ?? "Unknown Artist"),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.white70, fontSize: 18),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 18),
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 30),
-
                 // Progress Bar
                 Slider(
                   value: audioProvider.position.inMilliseconds.toDouble().clamp(
@@ -257,7 +224,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                   activeColor: Colors.white,
                   inactiveColor: Colors.white30,
                 ),
-
                 const SizedBox(height: 0),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -287,7 +253,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                 ),
                 const SizedBox(height: 2),
-
                 // Playback Controls
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -316,7 +281,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             );
 
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Added to favorites!')),
+                              const SnackBar(
+                                  content: Text('Added to favorites!')),
                             );
                           } catch (e) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -324,12 +290,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                             );
                           }
                         } else {
-                          // If it's unmarked as favorite, remove it
+                          // If it's unmarked as favorite, remove it and cancel the download if in progress
                           try {
+                            // Cancel the download if it's in progress
+                            await _storageService
+                                .cancelDownload(); // Cancel download
                             await _storageService.unlikeSong(
                               widget.songDetails.title,
                               widget.songDetails.artists,
                             );
+
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                   content: Text('Removed from favorites!')),

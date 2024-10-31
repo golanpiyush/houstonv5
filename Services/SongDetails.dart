@@ -1,3 +1,4 @@
+// ignore: file_names
 class SongDetails {
   final String title;
   final String artists;

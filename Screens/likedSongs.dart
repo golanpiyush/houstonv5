@@ -7,7 +7,7 @@ import 'PlayerScreen.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class LikedSongsScreen extends StatefulWidget {
-  const LikedSongsScreen({Key? key}) : super(key: key);
+  const LikedSongsScreen({super.key});
 
   @override
   _LikedSongsScreenState createState() => _LikedSongsScreenState();
@@ -86,7 +86,7 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
         centerTitle: true,
       ),
       body: _isLoading
-          ? Center(child: CircularProgressIndicator(color: Colors.white))
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : _likedSongs.isEmpty
               ? Center(
                   child: Text(
@@ -106,8 +106,8 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
                       background: Container(
                         color: Colors.red,
                         alignment: Alignment.centerRight,
-                        padding: EdgeInsets.only(right: 20.0),
-                        child: Icon(Icons.delete, color: Colors.white),
+                        padding: const EdgeInsets.only(right: 20.0),
+                        child: const Icon(Icons.delete, color: Colors.white),
                       ),
                       direction: DismissDirection.endToStart,
                       onDismissed: (direction) {
@@ -146,7 +146,8 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         trailing: IconButton(
-                          icon: Icon(Icons.more_vert, color: Colors.white70),
+                          icon: const Icon(Icons.more_vert,
+                              color: Colors.white70),
                           onPressed: () {
                             // Show options menu if needed
                             showModalBottomSheet(
@@ -156,9 +157,9 @@ class _LikedSongsScreenState extends State<LikedSongsScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   ListTile(
-                                    leading:
-                                        Icon(Icons.delete, color: Colors.white),
-                                    title: Text(
+                                    leading: const Icon(Icons.delete,
+                                        color: Colors.white),
+                                    title: const Text(
                                       'Remove from downloads',
                                       style: TextStyle(color: Colors.white),
                                     ),

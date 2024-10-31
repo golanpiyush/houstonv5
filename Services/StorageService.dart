@@ -1,93 +1,49 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 
-class StorageService {
+class StorageService extends ChangeNotifier {
   final Dio _dio = Dio();
+  bool _isDownloading = false;
+  double _downloadProgress = 0.0;
+  CancelToken? _cancelToken; // Add this line
+
   static const String _likedSongsKey = 'liked_songs';
 
-  // Method to handle song like and download
-  Future<void> likeSong({
-    required String title,
-    required String artist,
-    required String albumArtUrl,
-    required String audioUrl,
-  }) async {
-    try {
-      // First, check if the song is already liked
-      if (await isSongLiked(title, artist)) {
-        return; // Song already liked and downloaded
-      }
+  // Getters for download state
+  bool get isDownloading => _isDownloading;
+  double get downloadProgress => _downloadProgress;
 
-      // Create unique filenames for the downloads
-      String sanitizedTitle = title.replaceAll(RegExp(r'[^\w\s]+'), '');
-      String sanitizedArtist = artist.replaceAll(RegExp(r'[^\w\s]+'), '');
-      String baseFileName = '${sanitizedArtist}_$sanitizedTitle';
+  // Generate a unique ID for file names
+  String get _uniqueId => DateTime.now().millisecondsSinceEpoch.toString();
 
-      // Download both files concurrently
-      final futures = await Future.wait([
-        downloadFile(
-          audioUrl,
-          '$baseFileName.mp3',
-          onProgress: (received, total) {
-            if (total != -1) {
-              final progress = (received / total * 100).toStringAsFixed(1);
-              print('Audio Download Progress: $progress%');
-            }
-          },
-        ),
-        downloadFile(
-          albumArtUrl,
-          '$baseFileName.jpg',
-          onProgress: (received, total) {
-            if (total != -1) {
-              final progress = (received / total * 100).toStringAsFixed(1);
-              print('Album Art Download Progress: $progress%');
-            }
-          },
-        ),
-      ]);
-
-      String audioFilePath = futures[0];
-      String albumArtFilePath = futures[1];
-
-      // Save the song details with local file paths
-      await saveSongDetails(
-        title: title,
-        artist: artist,
-        albumArtPath: albumArtFilePath,
-        audioPath: audioFilePath,
-      );
-
-      // Mark the song as liked
-      await addToLikedSongs(title, artist);
-    } catch (e) {
-      throw Exception('Failed to process liked song: $e');
-    }
+  void _updateProgress(double progress) {
+    _downloadProgress = progress;
+    notifyListeners();
   }
 
   // Download file with progress tracking
   Future<String> downloadFile(
     String url,
-    String fileName, {
-    ProgressCallback? onProgress,
+    String filePath, {
+    required Function(double) onProgress,
   }) async {
+    if (await File(filePath).exists()) {
+      return filePath;
+    }
+
     try {
-      // Get the application documents directory for permanent storage
-      final Directory appDocDir = await getApplicationDocumentsDirectory();
-      final String filePath = '${appDocDir.path}/$fileName';
-
-      // Check if file already exists
-      if (await File(filePath).exists()) {
-        return filePath;
-      }
-
-      // Download the file with progress tracking
       await _dio.download(
         url,
         filePath,
-        onReceiveProgress: onProgress,
+        onReceiveProgress: (received, total) {
+          if (total != -1) {
+            final progress = received / total;
+            onProgress(progress);
+          }
+        },
       );
 
       return filePath;
@@ -127,7 +83,7 @@ class StorageService {
     return likedSongs.contains('${title}_$artist');
   }
 
-  // Get all liked songs
+  // Get all liked songs that have been downloaded
   Future<List<Map<String, String>>> getLikedSongs() async {
     final prefs = await SharedPreferences.getInstance();
     List<String> likedSongs = prefs.getStringList(_likedSongsKey) ?? [];
@@ -138,12 +94,24 @@ class StorageService {
       if (songData != null) {
         List<String> parts = songData.split('|');
         if (parts.length == 4) {
-          songDetails.add({
-            'title': parts[0],
-            'artist': parts[1],
-            'albumArtPath': parts[2],
-            'audioPath': parts[3],
-          });
+          // Extract details from parts
+          String title = parts[0];
+          String artist = parts[1];
+          String albumArtPath = parts[2];
+          String audioPath = parts[3];
+
+          // Check if both audio and album art files exist
+          final File albumArtFile = File(albumArtPath);
+          final File audioFile = File(audioPath);
+
+          if (await albumArtFile.exists() && await audioFile.exists()) {
+            songDetails.add({
+              'title': title,
+              'artist': artist,
+              'albumArtPath': albumArtPath,
+              'audioPath': audioPath,
+            });
+          }
         }
       }
     }
@@ -151,8 +119,82 @@ class StorageService {
     return songDetails;
   }
 
+  // Method to handle song like and download
+  Future<void> likeSong({
+    required String title,
+    required String artist,
+    required String albumArtUrl,
+    required String audioUrl,
+  }) async {
+    try {
+      if (await isSongLiked(title, artist)) return;
+      _cancelToken = CancelToken();
+
+      _isDownloading = true;
+      _downloadProgress = 0.0;
+      notifyListeners();
+
+      String sanitizedTitle = title.replaceAll(RegExp(r'[^\w\s]+'), '');
+      String sanitizedArtist = artist.replaceAll(RegExp(r'[^\w\s]+'), '');
+      String baseFileName = '${_uniqueId}_${sanitizedArtist}_$sanitizedTitle';
+
+      final Directory appDocDir = await getApplicationDocumentsDirectory();
+      final Directory songDir = Directory('${appDocDir.path}/houston_songs');
+      if (!await songDir.exists()) {
+        await songDir.create(recursive: true);
+      }
+
+      // Download audio and album art concurrently
+      final downloadResults = await Future.wait([
+        downloadFile(
+          audioUrl,
+          '${songDir.path}/$baseFileName.mp3',
+          onProgress: _updateProgress,
+        ),
+        downloadFile(
+          albumArtUrl,
+          '${songDir.path}/$baseFileName.jpg',
+          onProgress: _updateProgress,
+        ),
+      ]);
+
+      await saveSongDetails(
+        title: title,
+        artist: artist,
+        albumArtPath: downloadResults[1],
+        audioPath: downloadResults[0],
+      );
+
+      await addToLikedSongs(title, artist);
+      _isDownloading = false; // Reset the download state
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error downloading song: $e');
+      rethrow;
+    } finally {
+      _isDownloading = false;
+      _downloadProgress = 0.0;
+      _cancelToken = null; // Reset the cancel token
+
+      notifyListeners();
+    }
+  }
+
+  // New method to cancel the download
+  Future<void> cancelDownload() async {
+    if (_cancelToken != null) {
+      _cancelToken!.cancel("Download canceled");
+      _cancelToken = null; // Reset the token after canceling
+      _isDownloading = false;
+      _downloadProgress = 0.0;
+      notifyListeners();
+    }
+  }
+
   // Remove a song from liked songs
   Future<void> unlikeSong(String title, String artist) async {
+    await cancelDownload(); // Cancel the download if it's in progress
+
     final prefs = await SharedPreferences.getInstance();
     String songIdentifier = '${title}_$artist';
 
@@ -161,22 +203,36 @@ class StorageService {
     likedSongs.remove(songIdentifier);
     await prefs.setStringList(_likedSongsKey, likedSongs);
 
-    // Get stored paths
+    // Retrieve stored paths from SharedPreferences
     String? songData = prefs.getString(songIdentifier);
     if (songData != null) {
       List<String> parts = songData.split('|');
       if (parts.length == 4) {
-        // Delete the files with proper error handling
-        await File(parts[2])
-            .delete()
-            .catchError((error) => File(parts[2])); // Album art
-        await File(parts[3])
-            .delete()
-            .catchError((error) => File(parts[3])); // Audio
+        // Delete album art and audio files
+        final albumArtFile = File(parts[2]);
+        final audioFile = File(parts[3]);
+
+        try {
+          if (await albumArtFile.exists()) {
+            await albumArtFile.delete();
+            debugPrint('Album art file deleted: ${albumArtFile.path}');
+          }
+        } catch (error) {
+          debugPrint('Error deleting album art file: $error');
+        }
+
+        try {
+          if (await audioFile.exists()) {
+            await audioFile.delete();
+            debugPrint('Audio file deleted: ${audioFile.path}');
+          }
+        } catch (error) {
+          debugPrint('Error deleting audio file: $error');
+        }
       }
     }
 
-    // Remove song details
+    // Remove song details from SharedPreferences
     await prefs.remove(songIdentifier);
   }
 }

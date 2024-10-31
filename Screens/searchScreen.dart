@@ -57,7 +57,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
               content:
                   Text('No results found or song details are incomplete.')),
         );
@@ -118,7 +118,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
                 fontSize: 20,
                 shadows: [
                   Shadow(
-                    offset: Offset(1, 1),
+                    offset: const Offset(1, 1),
                     blurRadius: 3,
                     color: Colors.black.withOpacity(0.5),
                   ),
@@ -129,7 +129,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
             elevation: 0,
             actions: [
               IconButton(
-                icon: Icon(Icons.favorite, color: Colors.red),
+                icon: const Icon(Icons.favorite, color: Colors.red),
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -151,7 +151,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
                     controller: _controller,
                     decoration: InputDecoration(
                       hintText: 'Enter song name',
-                      hintStyle: TextStyle(color: Colors.black54),
+                      hintStyle: const TextStyle(color: Colors.black54),
                       suffixIcon: _isLoading
                           ? const Padding(
                               padding: EdgeInsets.all(12.0),
@@ -162,7 +162,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
                               ),
                             )
                           : IconButton(
-                              icon: Icon(Icons.search),
+                              icon: const Icon(Icons.search),
                               onPressed: _isLoading ? null : _onSearchPressed,
                             ),
                       border: OutlineInputBorder(

@@ -1,26 +1,39 @@
 import 'package:flutter/material.dart';
 
-class DownloadProgressNotifier extends ChangeNotifier {
-  double _progress = 0.0;
-  bool _isDownloading = false;
+class DownloadProgressBar extends StatelessWidget {
+  final double progress;
+  final bool isDownloading;
 
-  double get progress => _progress;
-  bool get isDownloading => _isDownloading;
+  const DownloadProgressBar({
+    super.key,
+    required this.progress,
+    required this.isDownloading,
+  });
 
-  void startDownload() {
-    _isDownloading = true;
-    _progress = 0.0;
-    notifyListeners();
-  }
+  @override
+  Widget build(BuildContext context) {
+    if (!isDownloading) return const SizedBox.shrink();
 
-  void updateProgress(double newProgress) {
-    _progress = newProgress;
-    notifyListeners();
-  }
-
-  void completeDownload() {
-    _isDownloading = false;
-    _progress = 100.0; // Optional: Set to 100% when complete
-    notifyListeners();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LinearProgressIndicator(
+          value: progress,
+          backgroundColor: Colors.red[200], // Light red background
+          valueColor: const AlwaysStoppedAnimation<Color>(
+            Colors.red, // Red color for the progress bar
+          ),
+          minHeight: 24,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${(progress * 100).toStringAsFixed(1)}%',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: Colors.red), // Red text color
+        ),
+      ],
+    );
   }
 }
