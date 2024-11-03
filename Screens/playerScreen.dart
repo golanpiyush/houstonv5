@@ -6,6 +6,7 @@ import '../Services/SongDetails.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../Services/StorageService.dart';
 import 'dart:io';
+import 'dart:async';
 
 class PlayerScreen extends StatefulWidget {
   final SongDetails songDetails;
@@ -19,21 +20,35 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen>
     with SingleTickerProviderStateMixin {
   Color? vibrantColor;
-  bool isFavorite = false; // Variable to track favorite state
+  bool isFavorite = false;
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
-  bool _isControllerInitialized =
-      false; // Flag to track controller initialization
-  // double _progress = 0.0;
+  bool _isControllerInitialized = false;
+  bool _mounted = true;
   double downloadProgress = 0.0;
+  Timer? _colorLoadingTimer;
 
   final StorageService _storageService = StorageService();
+  final PaletteGeneratorService _paletteService = PaletteGeneratorService();
 
   @override
   void initState() {
     super.initState();
     _initializeAnimation();
-    _checkIfSongIsLiked(); // Check if the song is liked
+    _checkIfSongIsLiked();
+    _initializeScreen();
+  }
+
+  void _initializeScreen() {
+    if (!_mounted) return;
+
+    _loadVibrantColor(widget.songDetails.albumArt);
+
+    // Initialize audio provider after frame is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_mounted) return;
+      _initializeAudioProvider();
+    });
   }
 
   void _initializeAnimation() {
@@ -42,295 +57,322 @@ class _PlayerScreenState extends State<PlayerScreen>
       vsync: this,
     );
     _fadeAnimation = Tween<double>(begin: 0.8, end: 0.0).animate(_controller);
-    _isControllerInitialized = true; // Set the flag to true
+    _isControllerInitialized = true;
+  }
+
+  void _initializeAudioProvider() {
+    final audioProvider = Provider.of<AudioProvider>(context, listen: false);
+    audioProvider.setCurrentSongDetails(widget.songDetails);
+
+    if (widget.songDetails.audioUrl.isNotEmpty &&
+        widget.songDetails.albumArt.isNotEmpty) {
+      audioProvider.playSong(
+          widget.songDetails.audioUrl, widget.songDetails.albumArt);
+    }
+  }
+
+  Future<void> _checkIfSongIsLiked() async {
+    if (!_mounted) return;
+
+    try {
+      final isLiked = await _storageService.isSongLiked(
+        widget.songDetails.title,
+        widget.songDetails.artists,
+      );
+      if (!_mounted) return;
+
+      setState(() {
+        isFavorite = isLiked;
+      });
+    } catch (e) {
+      debugPrint('Error checking if song is liked: $e');
+    }
+  }
+
+  Future<void> _loadVibrantColor(String imageUrl) async {
+    if (!_mounted || imageUrl.isEmpty) return;
+
+    _colorLoadingTimer?.cancel();
+
+    try {
+      // Start with a loading delay
+      _colorLoadingTimer = Timer(const Duration(milliseconds: 500), () async {
+        if (!_mounted) return;
+
+        try {
+          final color = await _paletteService.getVibrantColor(imageUrl);
+          if (!_mounted) return;
+
+          setState(() {
+            vibrantColor = color;
+          });
+        } catch (e) {
+          debugPrint('Error generating palette: $e');
+          if (!_mounted) return;
+
+          setState(() {
+            vibrantColor = Colors.blue; // Fallback color
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('Error setting up color loading: $e');
+    }
+  }
+
+  Future<void> _handleFavoriteToggle() async {
+    if (!_mounted) return;
+
+    final previousState = isFavorite;
+    setState(() {
+      isFavorite = !isFavorite;
+    });
+
+    try {
+      if (isFavorite) {
+        await _storageService.likeSong(
+          title: widget.songDetails.title,
+          artist: widget.songDetails.artists,
+          albumArtUrl: widget.songDetails.albumArt,
+          audioUrl: widget.songDetails.audioUrl,
+        );
+        _showSnackBar('Added to favorites!');
+      } else {
+        await _storageService.cancelDownload();
+        await _storageService.unlikeSong(
+          widget.songDetails.title,
+          widget.songDetails.artists,
+        );
+        _showSnackBar('Removed from favorites!');
+      }
+    } catch (e) {
+      debugPrint('Error handling favorite toggle: $e');
+      // Revert state on error
+      if (_mounted) {
+        setState(() {
+          isFavorite = previousState;
+        });
+        _showSnackBar('Error updating favorites: Please try again');
+      }
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!_mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
   void dispose() {
+    _mounted = false;
+    _colorLoadingTimer?.cancel();
     if (_isControllerInitialized) {
       _controller.dispose();
     }
     super.dispose();
   }
 
-  Future<void> _checkIfSongIsLiked() async {
-    final isLiked = await _storageService.isSongLiked(
-      widget.songDetails.title,
-      widget.songDetails.artists,
-    );
-    setState(() {
-      isFavorite = isLiked;
-    });
-  }
-
-  Future<void> _loadVibrantColor(String imageUrl) async {
-    final paletteGeneratorService = PaletteGeneratorService();
-    final color = await paletteGeneratorService.getVibrantColor(imageUrl);
-    setState(() {
-      vibrantColor = color;
-    });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final audioProvider = Provider.of<AudioProvider>(context, listen: false);
-
-    // Wrap state changes in addPostFrameCallback to avoid build phase errors
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      audioProvider.setCurrentSongDetails(widget.songDetails);
-      audioProvider.currentSongTitle = widget.songDetails.title;
-      audioProvider.currentArtist = widget.songDetails.artists;
-      audioProvider.currentAlbumArtUrl = widget.songDetails.albumArt;
-      audioProvider.currentAudioUrl = widget.songDetails.audioUrl;
-
-      // Ensure both audioUrl and albumArt are provided
-      if (widget.songDetails.audioUrl.isNotEmpty &&
-          widget.songDetails.albumArt.isNotEmpty) {
-        audioProvider.playSong(
-            widget.songDetails.audioUrl, widget.songDetails.albumArt);
-      }
-
-      _loadVibrantColor(widget.songDetails.albumArt);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Consumer<AudioProvider>(
       builder: (context, audioProvider, child) {
-        // Determine if the audio is playing
-        bool isPlaying = audioProvider.isPlaying;
+        final isPlaying = audioProvider.isPlaying;
 
-        // Control the fade animation based on playback state
         if (_isControllerInitialized) {
           if (isPlaying) {
-            _controller.forward(); // Fade out when playing
+            _controller.forward();
           } else {
-            _controller.reverse(); // Fade in when paused
+            _controller.reverse();
           }
         }
 
         return Scaffold(
           backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            elevation: 0,
-            title: Text(audioProvider.currentSongTitle ?? "Unknown Title"),
-            centerTitle: true,
-            actions: const [],
-          ),
-          body: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: () async {
-                    await audioProvider.togglePlayPause();
-                  },
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Container(
-                          width: 340,
-                          height: 340,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: vibrantColor?.withOpacity(0.7) ??
-                                    Colors.black45,
-                                blurRadius: 20,
-                                offset: const Offset(5, 5),
-                              ),
-                            ],
-                            image: DecorationImage(
-                              image: audioProvider.currentAlbumArtUrl != null &&
-                                      audioProvider
-                                          .currentAlbumArtUrl!.isNotEmpty
-                                  ? (Uri.tryParse(audioProvider
-                                                  .currentAlbumArtUrl!)
-                                              ?.hasScheme ??
-                                          false
-                                      ? NetworkImage(audioProvider
-                                          .currentAlbumArtUrl!) // Use network image if valid URL
-                                      : FileImage(File(audioProvider
-                                          .currentAlbumArtUrl!))) // Fallback to local file
-                                  : const AssetImage(
-                                      'assets/images/default_album_art.jpg'), // Fallback to default asset if both are invalid
-                              fit: BoxFit.cover,
-                            ),
-                          )),
-                      // Low-light filter overlay with fade animation
-                      FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Container(
-                          width: 340,
-                          height: 340,
-                          decoration: BoxDecoration(
-                            color: Colors.black
-                                .withOpacity(0.9), // Low light filter
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 30),
-                // Song Title and Artist
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Center(
-                    child: Text(
-                      truncateText(
-                          audioProvider.currentSongTitle ?? "Unknown Title"),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontFamily: 'Jost',
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Center(
-                    child: Text(
-                      truncateText(
-                          audioProvider.currentArtist ?? "Unknown Artist"),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 18),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 30),
-                // Progress Bar
-                Slider(
-                  value: audioProvider.position.inMilliseconds.toDouble().clamp(
-                      0,
-                      (audioProvider.duration?.inMilliseconds.toDouble() ?? 1)),
-                  min: 0,
-                  max: (audioProvider.duration?.inMilliseconds.toDouble() ?? 1),
-                  onChanged: (value) {
-                    audioProvider.seekTo(Duration(milliseconds: value.toInt()));
-                  },
-                  activeColor: vibrantColor,
-                  inactiveColor: Colors.white30,
-                ),
-                const SizedBox(height: 0),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _formatDuration(audioProvider.position),
-                        style: GoogleFonts.jost(
-                          color: Colors.white, // Text color
-                          fontWeight:
-                              FontWeight.w400, // Medium weight for Jost font
-                          fontSize: 12, // Adjust font size as desired
-                        ),
-                      ),
-                      Text(
-                        _formatDuration(
-                            audioProvider.duration ?? Duration.zero),
-                        style: GoogleFonts.jost(
-                          color: Colors.white, // Text color
-                          fontWeight:
-                              FontWeight.w400, // Medium weight for Jost font
-                          fontSize: 12, // Adjust font size as desired
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                // Playback Controls
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        isFavorite ? Icons.favorite : Icons.favorite_border,
-                      ),
-                      color: isFavorite
-                          ? vibrantColor ?? Colors.white
-                          : Colors.white,
-                      iconSize: 30,
-                      onPressed: () async {
-                        setState(() {
-                          isFavorite = !isFavorite; // Toggle favorite state
-                        });
-
-                        // If it's marked as favorite, save the song details locally
-                        if (isFavorite) {
-                          try {
-                            await _storageService.likeSong(
-                              title: widget.songDetails.title,
-                              artist: widget.songDetails.artists,
-                              albumArtUrl: widget.songDetails.albumArt,
-                              audioUrl: widget.songDetails.audioUrl,
-                            );
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Added to favorites!')),
-                            );
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error saving song: $e')),
-                            );
-                          }
-                        } else {
-                          // If it's unmarked as favorite, remove it and cancel the download if in progress
-                          try {
-                            // Cancel the download if it's in progress
-                            await _storageService
-                                .cancelDownload(); // Cancel download
-                            await _storageService.unlikeSong(
-                              widget.songDetails.title,
-                              widget.songDetails.artists,
-                            );
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Removed from favorites!')),
-                            );
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                  content: Text('Error removing song: $e')),
-                            );
-                          }
-                        }
-                      },
-                    ),
-                    const SizedBox(width: 40),
-                    IconButton(
-                      icon: Icon(
-                        isPlaying ? Icons.pause : Icons.play_arrow,
-                      ),
-                      color: vibrantColor,
-                      iconSize: 50,
-                      onPressed: () async {
-                        await audioProvider.togglePlayPause();
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          appBar: _buildAppBar(audioProvider),
+          body: _buildBody(audioProvider, isPlaying),
         );
       },
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(AudioProvider audioProvider) {
+    return AppBar(
+      backgroundColor: Colors.black,
+      elevation: 0,
+      title: Text(audioProvider.currentSongTitle ?? "Unknown Title"),
+      centerTitle: true,
+      actions: const [],
+    );
+  }
+
+  Widget _buildBody(AudioProvider audioProvider, bool isPlaying) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildAlbumArt(audioProvider, isPlaying),
+          const SizedBox(height: 30),
+          _buildSongInfo(audioProvider),
+          const SizedBox(height: 30),
+          _buildProgressBar(audioProvider),
+          _buildTimeLabels(audioProvider),
+          const SizedBox(height: 2),
+          _buildControls(audioProvider, isPlaying),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAlbumArt(AudioProvider audioProvider, bool isPlaying) {
+    return GestureDetector(
+      onTap: () => audioProvider.togglePlayPause(),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          _buildAlbumArtContainer(audioProvider),
+          _buildFadeOverlay(isPlaying),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAlbumArtContainer(AudioProvider audioProvider) {
+    return Container(
+      width: 340,
+      height: 340,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: vibrantColor?.withOpacity(0.7) ?? Colors.black45,
+            blurRadius: 20,
+            offset: const Offset(5, 5),
+          ),
+        ],
+        image: DecorationImage(
+          image: _getAlbumArtImage(audioProvider.currentAlbumArtUrl),
+          fit: BoxFit.cover,
+        ),
+      ),
+    );
+  }
+
+  ImageProvider _getAlbumArtImage(String? url) {
+    if (url != null && url.isNotEmpty) {
+      if (Uri.tryParse(url)?.hasScheme ?? false) {
+        return NetworkImage(url);
+      }
+      return FileImage(File(url));
+    }
+    return const AssetImage('assets/images/default_album_art.jpg');
+  }
+
+  Widget _buildFadeOverlay(bool isPlaying) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Container(
+        width: 340,
+        height: 340,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSongInfo(AudioProvider audioProvider) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Text(
+            truncateText(audioProvider.currentSongTitle ?? "Unknown Title"),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontFamily: 'Jost',
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Text(
+            truncateText(audioProvider.currentArtist ?? "Unknown Artist"),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white70, fontSize: 18),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProgressBar(AudioProvider audioProvider) {
+    return Slider(
+      value: audioProvider.position.inMilliseconds
+          .toDouble()
+          .clamp(0, (audioProvider.duration?.inMilliseconds.toDouble() ?? 1)),
+      min: 0,
+      max: (audioProvider.duration?.inMilliseconds.toDouble() ?? 1),
+      onChanged: (value) {
+        audioProvider.seekTo(Duration(milliseconds: value.toInt()));
+      },
+      activeColor: vibrantColor,
+      inactiveColor: Colors.white30,
+    );
+  }
+
+  Widget _buildTimeLabels(AudioProvider audioProvider) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _buildTimeLabel(audioProvider.position),
+          _buildTimeLabel(audioProvider.duration ?? Duration.zero),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeLabel(Duration duration) {
+    return Text(
+      _formatDuration(duration),
+      style: GoogleFonts.jost(
+        color: Colors.white,
+        fontWeight: FontWeight.w400,
+        fontSize: 12,
+      ),
+    );
+  }
+
+  Widget _buildControls(AudioProvider audioProvider, bool isPlaying) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          icon: Icon(
+            isFavorite ? Icons.favorite : Icons.favorite_border,
+          ),
+          color: isFavorite ? vibrantColor ?? Colors.white : Colors.white,
+          iconSize: 30,
+          onPressed: _handleFavoriteToggle,
+        ),
+        const SizedBox(width: 40),
+        IconButton(
+          icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+          color: vibrantColor,
+          iconSize: 50,
+          onPressed: () => audioProvider.togglePlayPause(),
+        ),
+      ],
     );
   }
 
@@ -341,12 +383,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     return "$minutes:$seconds";
   }
 
-  // Method to truncate text if it exceeds a certain length
   String truncateText(String text) {
-    const int maxLength = 25; // Maximum length for the text
+    const int maxLength = 25;
     if (text.length > maxLength) {
-      return '${text.substring(0, maxLength)}...'; // Truncate and add ellipsis
+      return '${text.substring(0, maxLength)}...';
     }
-    return text; // Return the original text if it's within the limit
+    return text;
   }
 }

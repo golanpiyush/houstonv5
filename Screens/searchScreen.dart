@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:lottie/lottie.dart'; // Import Lottie package
+import 'package:lottie/lottie.dart';
 import '../../Services/musicApiService.dart';
 import 'playerScreen.dart';
-import 'likedSongs.dart'; // Import the LikedSongsScreen
+import 'likedSongs.dart';
+import 'miniplayer.dart'; // Import MiniPlayer
+import '../../Services/AudioProvider.dart'; // Ensure AudioProvider is imported
+import 'package:provider/provider.dart';
 
 class SongSearchScreen extends StatefulWidget {
   const SongSearchScreen({super.key});
@@ -75,7 +78,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
 
   void _onSearchPressed() {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 500), () {
+    _debounce = Timer(const Duration(milliseconds: 300), () {
       _searchSong();
     });
   }
@@ -93,11 +96,9 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
         ),
         // Lottie animation layer
         Positioned(
-          left:
-              -50, // Shift to the left by 20 pixels (adjust this value as needed)
+          left: -50,
           top: 0,
-          right:
-              20, // Optional: add some space on the right if needed for centering
+          right: 20,
           bottom: 0,
           child: Lottie.asset(
             'assets/images/Animations/dog_animation.json',
@@ -157,8 +158,8 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
                               padding: EdgeInsets.all(12.0),
                               child: CircularProgressIndicator(
                                 strokeWidth: 2.0,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                    Color.fromARGB(255, 255, 0, 0)),
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.red),
                               ),
                             )
                           : IconButton(
@@ -179,6 +180,21 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
             ),
           ),
         ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Consumer<AudioProvider>(
+            builder: (context, audioProvider, child) {
+              return Visibility(
+                visible: !audioProvider.isPlayerScreenVisible,
+                child: const MiniPlayer(),
+              );
+            },
+          ),
+        ),
+
+        // MiniPlayer at the bottom of the screen
       ],
     );
   }

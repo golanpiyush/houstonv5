@@ -1,21 +1,20 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../Services/AudioProvider.dart'; // Import your audio provider
-import '../Screens/playerScreen.dart'; // Import your player screen
-import '../Services/SongDetails.dart'; // Import your SongDetails class
+import '../Services/AudioProvider.dart';
+import '../Screens/playerScreen.dart';
+import '../Services/SongDetails.dart';
 
 class MiniPlayer extends StatelessWidget {
+  const MiniPlayer({super.key});
+
   @override
   Widget build(BuildContext context) {
     final audioProvider = Provider.of<AudioProvider>(context);
 
     return GestureDetector(
       onTap: () {
-        // Check if the song in the mini player is the same as the currently selected song
         if (audioProvider.currentAudioUrl == audioProvider.currentAudioUrl) {
-          // Navigate to the player screen
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -25,41 +24,34 @@ class MiniPlayer extends StatelessWidget {
                   artists: audioProvider.currentArtist ?? 'No Artist',
                   albumArt: audioProvider.currentAlbumArtUrl ?? '',
                   audioUrl: audioProvider.currentAudioUrl ?? '',
-                  duration: '', // Replace with actual duration if available
+                  duration: '',
                 ),
               ),
             ),
           ).then((_) {
-            // Reset visibility when returning to the previous screen
             audioProvider.setPlayerScreenVisible(false);
           });
         } else {
-          // If a different song is selected
           audioProvider.setPlayerScreenVisible(true);
-
-          // Set current song details and initialize audio playback
           audioProvider.setCurrentSongDetails(SongDetails(
             title: audioProvider.currentSongTitle ?? 'No Title',
             artists: audioProvider.currentArtist ?? 'No Artist',
             albumArt: audioProvider.currentAlbumArtUrl ?? '',
             audioUrl: audioProvider.currentAudioUrl ?? '',
-            duration: '', // Replace with actual duration if available
+            duration: '',
           ));
-
-          // Call the playSong method to initialize playback
           audioProvider.playSong(audioProvider.currentAudioUrl ?? '',
               audioProvider.currentAlbumArtUrl ?? '');
         }
       },
       child: Container(
-        padding: EdgeInsets.all(10),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: Colors.black54,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           children: [
-            // Display album art
             ClipOval(
               child: audioProvider.currentAlbumArtUrl != null &&
                       audioProvider.currentAlbumArtUrl!.isNotEmpty
@@ -72,6 +64,8 @@ class MiniPlayer extends StatelessWidget {
                           height: 50,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
+                            print(
+                                "Network image failed to load"); // Debug for image
                             return const Icon(Icons.music_note, size: 50);
                           },
                         )
@@ -81,6 +75,8 @@ class MiniPlayer extends StatelessWidget {
                           height: 50,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
+                            print(
+                                "File image failed to load"); // Debug for image
                             return const Icon(Icons.music_note, size: 50);
                           },
                         ))
@@ -90,34 +86,43 @@ class MiniPlayer extends StatelessWidget {
                       height: 50,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
+                        print("Asset image failed to load"); // Debug for image
                         return const Icon(Icons.music_note, size: 50);
                       },
                     ),
             ),
-            SizedBox(width: 10),
-            // Display song title and artist
+            const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Ensure text decoration is set to none
                 Text(
                   audioProvider.currentSongTitle ?? 'No Title',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
+                  style: const TextStyle(
+                    fontFamily: 'Mosterrat',
+                    color: Colors.white,
+                    fontSize: 16,
+                    decoration: TextDecoration.none, // No underline
+                  ),
                 ),
                 Text(
                   audioProvider.currentArtist ?? 'No Artist',
-                  style: TextStyle(color: Colors.grey, fontSize: 14),
+                  style: const TextStyle(
+                    fontFamily: 'Mosterrat',
+                    color: Colors.grey,
+                    fontSize: 14,
+                    decoration: TextDecoration.none, // No underline
+                  ),
                 ),
               ],
             ),
-            Spacer(),
-            // Optionally, add a play/pause button here
+            const Spacer(),
             IconButton(
               icon: Icon(
                 audioProvider.isPlaying ? Icons.pause : Icons.play_arrow,
                 color: Colors.white,
               ),
               onPressed: () {
-                // Handle play/pause functionality here
                 audioProvider.togglePlayPause();
               },
             ),

@@ -4,8 +4,7 @@ import 'dart:async';
 class DownloadProgressWidget extends StatefulWidget {
   final Stream<double> progressStream;
 
-  const DownloadProgressWidget({Key? key, required this.progressStream})
-      : super(key: key);
+  const DownloadProgressWidget({super.key, required this.progressStream});
 
   @override
   _DownloadProgressWidgetState createState() => _DownloadProgressWidgetState();
@@ -86,12 +85,12 @@ class _DownloadProgressWidgetState extends State<DownloadProgressWidget>
             width: double.infinity,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(4),
-              color: Color.fromARGB(83, 93, 14, 241),
+              color: const Color.fromARGB(83, 93, 14, 241),
             ),
             child: LinearProgressIndicator(
               value: _progress,
               backgroundColor: Colors.transparent,
-              valueColor: AlwaysStoppedAnimation<Color>(
+              valueColor: const AlwaysStoppedAnimation<Color>(
                   Color.fromARGB(226, 45, 7, 212)),
             ),
           ),
