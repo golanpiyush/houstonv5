@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:houstonv8/Services/SongDetails.dart';
 import 'package:provider/provider.dart';
+import '../Services/PaletteGeneratorService.dart';
 import '../Services/AudioProvider.dart';
-import '../Services/SongDetails.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../Services/StorageService.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-
 import 'dart:io';
 import 'dart:async';
 
@@ -20,37 +19,30 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen>
     with SingleTickerProviderStateMixin {
+  Color? vibrantColor;
   bool isFavorite = false;
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   bool _isControllerInitialized = false;
   bool _mounted = true;
-  bool isLooping = false; // Declare the variable here
-
   double downloadProgress = 0.0;
   Timer? _colorLoadingTimer;
 
   final StorageService _storageService = StorageService();
+  final PaletteGeneratorService _paletteService = PaletteGeneratorService();
 
   @override
   void initState() {
     super.initState();
-
     _initializeAnimation();
     _checkIfSongIsLiked();
     _initializeScreen();
-    // _audioProvider = context.read<AudioProvider>();
-    // _audioProvider.addListener(_updateUI);
-  }
-
-  @override
-  void didUpdateWidget(covariant PlayerScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.songDetails.albumArt != widget.songDetails.albumArt) {}
   }
 
   void _initializeScreen() {
     if (!_mounted) return;
+
+    _loadVibrantColor(widget.songDetails.albumArt);
 
     // Initialize audio provider after frame is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -67,7 +59,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     _fadeAnimation = Tween<double>(begin: 0.8, end: 0.0).animate(_controller);
     _isControllerInitialized = true;
   }
-  // Setter to update current song details
 
   void _initializeAudioProvider() {
     final audioProvider = Provider.of<AudioProvider>(context, listen: false);
@@ -95,6 +86,37 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
     } catch (e) {
       debugPrint('Error checking if song is liked: $e');
+    }
+  }
+
+  Future<void> _loadVibrantColor(String imageUrl) async {
+    if (!_mounted || imageUrl.isEmpty) return;
+
+    _colorLoadingTimer?.cancel();
+
+    try {
+      // Start with a loading delay
+      _colorLoadingTimer = Timer(const Duration(milliseconds: 500), () async {
+        if (!_mounted) return;
+
+        try {
+          final color = await _paletteService.getVibrantColor(imageUrl);
+          if (!_mounted) return;
+
+          setState(() {
+            vibrantColor = color;
+          });
+        } catch (e) {
+          debugPrint('Error generating palette: $e');
+          if (!_mounted) return;
+
+          setState(() {
+            vibrantColor = Colors.blue; // Fallback color
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('Error setting up color loading: $e');
     }
   }
 
@@ -179,7 +201,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     return AppBar(
       backgroundColor: Colors.black,
       elevation: 0,
-      title: Text(audioProvider.currentSongTitle ?? "hello"),
+      title: Text(audioProvider.currentSongTitle ?? "Unknown Title"),
       centerTitle: true,
       actions: const [],
     );
@@ -206,40 +228,27 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget _buildAlbumArt(AudioProvider audioProvider, bool isPlaying) {
     return GestureDetector(
       onTap: () => audioProvider.togglePlayPause(),
-      onHorizontalDragEnd: (details) {
-        // Check if the swipe gesture is from right to left (next song)
-        if (details.velocity.pixelsPerSecond.dx < 0) {
-          audioProvider.nextSong(); // Play the next song
-        }
-        // Check if the swipe gesture is from left to right (previous song)
-        else if (details.velocity.pixelsPerSecond.dx > 0) {
-          audioProvider.previousSong(); // Play the previous song
-        }
-      },
       child: Stack(
         alignment: Alignment.center,
         children: [
-          _buildAlbumArtContainer(
-              audioProvider), // Your method to build the album art container
-          _buildFadeOverlay(isPlaying), // Your method to build the fade overlay
+          _buildAlbumArtContainer(audioProvider),
+          _buildFadeOverlay(isPlaying),
         ],
       ),
     );
   }
 
   Widget _buildAlbumArtContainer(AudioProvider audioProvider) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 900), // Fade duration
-      curve: Curves.easeInOut, // Smoothing curve for the fade
+    return Container(
       width: 340,
       height: 340,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: audioProvider.vibrantColor.withOpacity(0.7),
+            color: audioProvider.vibrantColor,
             blurRadius: 20,
-            offset: const Offset(6, 6),
+            offset: const Offset(6, 7),
           ),
         ],
         image: DecorationImage(
@@ -280,7 +289,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20.0),
           child: Text(
-            truncateText(audioProvider.currentSongTitle ?? "title"),
+            truncateText(audioProvider.currentSongTitle ?? "Unknown Title"),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -316,7 +325,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         audioProvider.seekTo(Duration(milliseconds: value.toInt()));
       },
       activeColor: audioProvider.vibrantColor,
-      inactiveColor: const Color.fromARGB(61, 255, 255, 255),
+      inactiveColor: Colors.white30,
     );
   }
 
@@ -349,11 +358,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          icon: FaIcon(
+          icon: Icon(
             isFavorite ? Icons.favorite : Icons.favorite_border,
           ),
-          color: isFavorite ? audioProvider.vibrantColor : Colors.white,
-          iconSize: 25,
+          color: isFavorite
+              ? audioProvider.vibrantColor
+              : audioProvider.vibrantColor,
+          iconSize: 30,
           onPressed: _handleFavoriteToggle,
         ),
         const SizedBox(width: 40),
@@ -361,25 +372,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
           color: audioProvider.vibrantColor,
           iconSize: 50,
-          onPressed: () {
-            audioProvider.togglePlayPause();
-            // Optionally change vibrantColor based on play state
-          },
-        ),
-        const SizedBox(width: 40), // Space between buttons
-        IconButton(
-          icon: const FaIcon(
-            FontAwesomeIcons.infinity,
-          ),
-          color: isLooping ? audioProvider.vibrantColor : Colors.white,
-          iconSize: 25,
-          onPressed: () {
-            setState(() {
-              isLooping = !isLooping; // Toggle loop state
-              // Call a method to update audioProvider to loop mode if needed
-              audioProvider.setLoopMode(isLooping);
-            });
-          },
+          onPressed: () => audioProvider.togglePlayPause(),
         ),
       ],
     );
