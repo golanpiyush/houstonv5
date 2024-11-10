@@ -16,7 +16,7 @@ class StorageService extends ChangeNotifier {
   double _downloadProgress = 0.0;
   CancelToken? _cancelToken; // Add this line
   final StreamController<double> _progressController =
-      StreamController<double>.broadcast();
+      StreamController<double>();
 
   static const String _likedSongsKey = 'liked_songs';
 
@@ -35,9 +35,7 @@ class StorageService extends ChangeNotifier {
 
   void _updateProgress(double progress) {
     _downloadProgress = progress;
-    _progressController.add(progress); // Emit the new progress
-
-    debugPrint('Progress updated: $_downloadProgress');
+    _progressController.add(progress);
     notifyListeners();
   }
 
@@ -107,18 +105,20 @@ class StorageService extends ChangeNotifier {
     List<String> likedSongs = prefs.getStringList(_likedSongsKey) ?? [];
     List<Map<String, String>> songDetails = [];
 
+    debugPrint("Liked song IDs: $likedSongs"); // Debug print to see IDs
+
     for (String songId in likedSongs) {
       String? songData = prefs.getString(songId);
       if (songData != null) {
         List<String> parts = songData.split('|');
         if (parts.length == 4) {
-          // Extract details from parts
           String title = parts[0];
           String artist = parts[1];
           String albumArtPath = parts[2];
           String audioPath = parts[3];
 
-          // Check if both audio and album art files exist
+          debugPrint("Retrieved song - Title: $title, Artist: $artist");
+
           final File albumArtFile = File(albumArtPath);
           final File audioFile = File(audioPath);
 
@@ -129,11 +129,20 @@ class StorageService extends ChangeNotifier {
               'albumArtPath': albumArtPath,
               'audioPath': audioPath,
             });
+          } else {
+            debugPrint(
+                "Files do not exist - Audio: ${audioFile.path}, Art: ${albumArtFile.path}");
           }
+        } else {
+          debugPrint("Invalid song data format: $songData");
         }
+      } else {
+        debugPrint("No data found for song ID: $songId");
       }
     }
 
+    debugPrint(
+        "Final liked songs details: $songDetails"); // Final list of songs
     return songDetails;
   }
 
@@ -207,6 +216,7 @@ class StorageService extends ChangeNotifier {
     _isDownloading = false;
     _downloadProgress = 0.0;
     _cancelToken = null;
+    _progressController.add(0.0); // Reset progress
     notifyListeners();
   }
 

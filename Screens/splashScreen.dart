@@ -41,5 +41,18 @@ class _SplashScreenState extends State<SplashScreen> {
     return const Scaffold(
       body: Center(child: CircularProgressIndicator()), // Simple splash screen
     );
+    // Positioned(
+    //       bottom: 0,
+    //       left: 0,
+    //       right: 0,
+    //       child: Consumer<AudioProvider>(
+    //         builder: (context, audioProvider, child) {
+    //           return Visibility(
+    //             visible: !audioProvider.isPlayerScreenVisible,
+    //             child: const MiniPlayer(),
+    //           );
+    //         },
+    //       ),
+    //     ),
   }
 }

@@ -8,6 +8,7 @@ class MusicApiService {
   final String baseUrl;
   final int maxRetries = 3;
   final Duration timeoutDuration = const Duration(seconds: 5);
+  List<SongDetails> _relatedSongsQueue = []; // Queue for related songs
 
   MusicApiService({required this.baseUrl});
 
@@ -75,5 +76,54 @@ class MusicApiService {
       client.close();
     }
     return null;
+  }
+
+  Future<List<SongDetails>> fetchRelatedSongs(
+      String songName, String artistName) async {
+    final uri = Uri.parse('$baseUrl/relatedsongs');
+    final headers = await _getHeaders();
+    final body = jsonEncode({'song_name': songName, 'artist_name': artistName});
+
+    try {
+      // Debugging: Log the song name and artist name being passed to the API
+      print("Fetching related songs for: $songName by $artistName");
+      print("API Request body: $body");
+
+      final response = await http
+          .post(
+            uri,
+            headers: headers,
+            body: body,
+          )
+          .timeout(const Duration(seconds: 50));
+
+      // Debugging: Log the raw response body from the API
+      print("Raw response body: ${response.body}");
+
+      if (response.statusCode == 200) {
+        // Parse the response and handle the data
+        final List<dynamic> data = json.decode(response.body);
+
+        // Debugging: Log the decoded data to verify it matches expectations
+        print("Decoded response data: $data");
+
+        if (data.isNotEmpty) {
+          _relatedSongsQueue =
+              data.map((song) => SongDetails.fromJson(song)).toList();
+          print(
+              "Fetched related songs successfully: ${_relatedSongsQueue.length} songs");
+          return _relatedSongsQueue;
+        } else {
+          print("No related songs found for song: $songName by $artistName");
+          return [];
+        }
+      } else {
+        print("Failed to fetch related songs: ${response.statusCode}");
+        return [];
+      }
+    } catch (e) {
+      print("Error fetching related songs: $e");
+      return [];
+    }
   }
 }

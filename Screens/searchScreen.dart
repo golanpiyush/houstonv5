@@ -20,6 +20,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final MusicApiService _musicApiService =
       MusicApiService(baseUrl: 'https://hhlxm0tg-5000.inc1.devtunnels.ms/');
+
   bool _isLoading = false;
   Timer? _debounce;
 
@@ -41,6 +42,10 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
     String songName = _controller.text.trim();
     if (songName.isEmpty || _isLoading) return;
 
+    // Obtain a reference to the AudioProvider and clear the related songs queue
+    final audioProvider = Provider.of<AudioProvider>(context, listen: false);
+    audioProvider.clearRelatedSongs(); // Directly clear the queue here
+
     setState(() {
       _isLoading = true;
     });
@@ -53,9 +58,7 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => PlayerScreen(
-              songDetails: songDetails,
-            ),
+            builder: (context) => PlayerScreen(songDetails: songDetails),
           ),
         );
       } else {
@@ -193,8 +196,6 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
             },
           ),
         ),
-
-        // MiniPlayer at the bottom of the screen
       ],
     );
   }

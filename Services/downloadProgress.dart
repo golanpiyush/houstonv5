@@ -35,28 +35,21 @@ class _DownloadProgressWidgetState extends State<DownloadProgressWidget>
       if (mounted) {
         setState(() {
           _progress = progress;
-          print('Current progress: $progress'); // Debug output
         });
 
         if (progress > 0.0) {
           if (!_visible) {
-            setState(() {
-              _visible = true; // Show if progress starts
-            });
+            _visible = true; // Show if progress starts
             _animationController.forward();
           }
         } else if (progress >= 1.0) {
-          if (_visible) {
-            _visible = false; // Hide after completion
-
-            _animationController.reverse().then((_) {
-              if (mounted) {
-                setState(() {
-                  _visible = false; // Hide when complete
-                });
-              }
-            });
-          }
+          _animationController.reverse().then((_) {
+            if (mounted) {
+              setState(() {
+                _visible = false; // Hide when complete
+              });
+            }
+          });
         }
       }
     });
@@ -64,14 +57,13 @@ class _DownloadProgressWidgetState extends State<DownloadProgressWidget>
 
   @override
   void dispose() {
-    _progressSubscription.cancel(); // Cancel subscription to avoid memory leaks
+    _progressSubscription.cancel();
     _animationController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    print('Download Progress Widget - visible: $_visible');
     return Positioned(
       bottom: 20,
       left: 20,

@@ -6,7 +6,6 @@ import 'Services/StorageService.dart';
 import 'Services/AudioProvider.dart';
 import 'Screens/splashScreen.dart';
 import 'Screens/likedSongs.dart';
-import 'Services/downloadProgress.dart';
 import 'Screens/miniplayer.dart';
 
 void main() async {
@@ -51,6 +50,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   late Future<bool> _serverHealthCheck;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
@@ -59,85 +59,114 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<bool> _checkServerHealth() async {
-    final musicApiService =
-        MusicApiService(baseUrl: 'https://hhlxm0tg-5000.inc1.devtunnels.ms');
-    return await musicApiService.checkHealth();
+    try {
+      final musicApiService =
+          MusicApiService(baseUrl: 'https://hhlxm0tg-5000.inc1.devtunnels.ms');
+      return await musicApiService.checkHealth();
+    } catch (e) {
+      debugPrint('Server health check error: $e');
+      return false;
+    }
+  }
+
+  Widget _buildErrorScreen() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error, color: Colors.red, size: 80),
+          const SizedBox(height: 10),
+          const Text(
+            'Server is unreachable. Please check your connection or try again later.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 18),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _serverHealthCheck = _checkServerHealth();
+              });
+            },
+            child: const Text('Retry'),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const LikedSongsScreen(),
+                ),
+              );
+            },
+            child: const Text('Liked Songs'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMainContent() {
+    return Consumer<StorageService>(
+      builder: (context, storageService, child) {
+        return Stack(
+          children: [
+            const SplashScreen(),
+            // ValueListenableBuilder<double>(
+            //   valueListenable: storageService.progressNotifier,
+            //   builder: (context, progress, child) {
+            //     return DownloadProgressWidget(progress: progress);
+            //   },
+            // ),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Consumer<AudioProvider>(
+                builder: (context, audioProvider, child) {
+                  return AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: !audioProvider.isPlayerScreenVisible
+                        ? const MiniPlayer()
+                        : const SizedBox.shrink(),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
         title: const Text('Houston'),
       ),
-      body: FutureBuilder<bool>(
-        future: _serverHealthCheck,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError || !(snapshot.data ?? false)) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error, color: Colors.red, size: 80),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Server is unreachable. Please check your connection or try again later.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 18),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _serverHealthCheck = _checkServerHealth();
-                      });
-                    },
-                    child: const Text('Retry'),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const LikedSongsScreen()),
-                      );
-                    },
-                    child: const Text('Liked Songs'),
-                  ),
-                ],
-              ),
-            );
-          } else {
-            return Consumer<StorageService>(
-              builder: (context, storageService, child) {
-                return Stack(
-                  children: [
-                    const SplashScreen(),
-                    DownloadProgressWidget(
-                        progressStream: storageService.progressStream),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Consumer<AudioProvider>(
-                        builder: (context, audioProvider, child) {
-                          return Visibility(
-                            visible: !audioProvider.isPlayerScreenVisible,
-                            child: const MiniPlayer(),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                );
-              },
-            );
-          }
-        },
+      body: SafeArea(
+        child: FutureBuilder<bool>(
+          future: _serverHealthCheck,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            } else if (snapshot.hasError || !(snapshot.data ?? false)) {
+              return _buildErrorScreen();
+            } else {
+              return _buildMainContent();
+            }
+          },
+        ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    // Add any cleanup here if needed
+    super.dispose();
   }
 }

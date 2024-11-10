@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:houstonv8/Services/SongDetails.dart';
 import 'package:provider/provider.dart';
-import '../Services/PaletteGeneratorService.dart';
 import '../Services/AudioProvider.dart';
-import '../Services/SongDetails.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../Services/StorageService.dart';
 import 'dart:io';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
 import 'dart:async';
 
 class PlayerScreen extends StatefulWidget {
@@ -18,8 +19,7 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen>
-    with SingleTickerProviderStateMixin {
-  Color? vibrantColor;
+    with TickerProviderStateMixin {
   bool isFavorite = false;
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -27,22 +27,25 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _mounted = true;
   double downloadProgress = 0.0;
   Timer? _colorLoadingTimer;
+  late AnimationController _fadeInController;
 
   final StorageService _storageService = StorageService();
-  final PaletteGeneratorService _paletteService = PaletteGeneratorService();
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimation();
+    _initializeAnimation(); // Ensure that both _controller and _fadeInController are initialized
     _checkIfSongIsLiked();
     _initializeScreen();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final audioProvider = Provider.of<AudioProvider>(context, listen: false);
+      audioProvider.setAlbumArt(widget.songDetails.albumArt);
+    });
   }
 
   void _initializeScreen() {
     if (!_mounted) return;
-
-    _loadVibrantColor(widget.songDetails.albumArt);
 
     // Initialize audio provider after frame is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -51,13 +54,37 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
   }
 
+  // Initialize fade in animation for crossover effect
   void _initializeAnimation() {
+    // Play/Pause animation controller
     _controller = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
     _fadeAnimation = Tween<double>(begin: 0.8, end: 0.0).animate(_controller);
+
+    // Initialize fade-in animation for crossover effect
+    _fadeInController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
     _isControllerInitialized = true;
+  }
+
+  void _handleSongChange(bool isNext, AudioProvider audioProvider) {
+    _controller.forward(); // Start dimming current album art
+    _fadeInController.reset(); // Reset fade-in for the next album art
+
+    _controller.forward().then((_) {
+      if (isNext) {
+        audioProvider.nextSong();
+      } else {
+        audioProvider.previousSong();
+      }
+      _controller.reset(); // Reset dimming animation
+      _fadeInController.forward(); // Fade in the new album art
+    });
   }
 
   void _initializeAudioProvider() {
@@ -86,37 +113,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
     } catch (e) {
       debugPrint('Error checking if song is liked: $e');
-    }
-  }
-
-  Future<void> _loadVibrantColor(String imageUrl) async {
-    if (!_mounted || imageUrl.isEmpty) return;
-
-    _colorLoadingTimer?.cancel();
-
-    try {
-      // Start with a loading delay
-      _colorLoadingTimer = Timer(const Duration(milliseconds: 500), () async {
-        if (!_mounted) return;
-
-        try {
-          final color = await _paletteService.getVibrantColor(imageUrl);
-          if (!_mounted) return;
-
-          setState(() {
-            vibrantColor = color;
-          });
-        } catch (e) {
-          debugPrint('Error generating palette: $e');
-          if (!_mounted) return;
-
-          setState(() {
-            vibrantColor = Colors.blue; // Fallback color
-          });
-        }
-      });
-    } catch (e) {
-      debugPrint('Error setting up color loading: $e');
     }
   }
 
@@ -171,30 +167,34 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_isControllerInitialized) {
       _controller.dispose();
     }
+    _fadeInController.dispose();
+
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AudioProvider>(
-      builder: (context, audioProvider, child) {
-        final isPlaying = audioProvider.isPlaying;
+    return Consumer<AudioProvider>(builder: (context, audioProvider, child) {
+      final isPlaying = audioProvider.isPlaying;
 
+      // Ensure animations are triggered after the frame is built
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_isControllerInitialized) {
+          // Only update animation if the controller is initialized
           if (isPlaying) {
             _controller.forward();
           } else {
             _controller.reverse();
           }
         }
+      });
 
-        return Scaffold(
-          backgroundColor: Colors.black,
-          appBar: _buildAppBar(audioProvider),
-          body: _buildBody(audioProvider, isPlaying),
-        );
-      },
-    );
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: _buildAppBar(audioProvider),
+        body: _buildBody(audioProvider, isPlaying),
+      );
+    });
   }
 
   PreferredSizeWidget _buildAppBar(AudioProvider audioProvider) {
@@ -225,19 +225,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  Widget _buildAlbumArt(AudioProvider audioProvider, bool isPlaying) {
-    return GestureDetector(
-      onTap: () => audioProvider.togglePlayPause(),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          _buildAlbumArtContainer(audioProvider),
-          _buildFadeOverlay(isPlaying),
-        ],
-      ),
-    );
-  }
-
   Widget _buildAlbumArtContainer(AudioProvider audioProvider) {
     return Container(
       width: 340,
@@ -246,7 +233,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: vibrantColor?.withOpacity(0.7) ?? Colors.black45,
+            color: audioProvider.vibrantColor,
             blurRadius: 20,
             offset: const Offset(5, 5),
           ),
@@ -255,6 +242,34 @@ class _PlayerScreenState extends State<PlayerScreen>
           image: _getAlbumArtImage(audioProvider.currentAlbumArtUrl),
           fit: BoxFit.cover,
         ),
+      ),
+    );
+  }
+
+  Widget _buildAlbumArt(AudioProvider audioProvider, bool isPlaying) {
+    double? dragStartX;
+
+    return GestureDetector(
+      onTap: () => audioProvider.togglePlayPause(),
+      onHorizontalDragStart: (details) {
+        dragStartX = details.localPosition.dx;
+      },
+      onHorizontalDragEnd: (details) {
+        if (dragStartX != null) {
+          final dragDistance = details.localPosition.dx - dragStartX!;
+          const threshold = 40.0;
+          if (dragDistance.abs() > threshold) {
+            _handleSongChange(dragDistance < 0, audioProvider);
+          }
+        }
+        dragStartX = null;
+      },
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          _buildAlbumArtContainer(audioProvider),
+          _buildFadeOverlay(),
+        ],
       ),
     );
   }
@@ -269,7 +284,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     return const AssetImage('assets/images/default_album_art.jpg');
   }
 
-  Widget _buildFadeOverlay(bool isPlaying) {
+  Widget _buildFadeOverlay() {
     return FadeTransition(
       opacity: _fadeAnimation,
       child: Container(
@@ -324,7 +339,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       onChanged: (value) {
         audioProvider.seekTo(Duration(milliseconds: value.toInt()));
       },
-      activeColor: vibrantColor,
+      activeColor: audioProvider.vibrantColor,
       inactiveColor: Colors.white30,
     );
   }
@@ -361,17 +376,30 @@ class _PlayerScreenState extends State<PlayerScreen>
           icon: Icon(
             isFavorite ? Icons.favorite : Icons.favorite_border,
           ),
-          color: isFavorite ? vibrantColor ?? Colors.white : Colors.white,
+          color: isFavorite
+              ? audioProvider.vibrantColor
+              : audioProvider.vibrantColor,
           iconSize: 30,
           onPressed: _handleFavoriteToggle,
         ),
-        const SizedBox(width: 40),
+        const SizedBox(width: 30),
         IconButton(
           icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
-          color: vibrantColor,
+          color: audioProvider.vibrantColor,
           iconSize: 50,
           onPressed: () => audioProvider.togglePlayPause(),
         ),
+        const SizedBox(width: 30),
+        IconButton(
+          icon: const FaIcon(FontAwesomeIcons.infinity),
+          color: audioProvider.isLooping
+              ? audioProvider.vibrantColor
+              : Colors.grey, // Change color based on loop state
+          onPressed: () {
+            audioProvider.setLoopMode(!audioProvider.isLooping);
+            print('looping');
+          },
+        )
       ],
     );
   }
