@@ -9,8 +9,19 @@ class MusicApiService {
   final int maxRetries = 3;
   final Duration timeoutDuration = const Duration(seconds: 5);
   List<SongDetails> _relatedSongsQueue = []; // Queue for related songs
+  int? _expireTime; // Store the expire time
+  Timer? _expireCheckTimer; // Timer to periodically check expiration
 
-  MusicApiService({required this.baseUrl});
+  final List<SongDetails> _songHistory = []; // Define _songHistory here
+
+  MusicApiService({required this.baseUrl}) {
+    // Start the timer when the service is initialized
+    _startExpireCheck();
+    _restoreExpireTime(); // Restore expire time on service initialization
+  }
+
+  // Getter for song history
+  List<SongDetails> get songHistory => _songHistory;
 
   // Retrieve the username from SharedPreferences
   Future<String?> _getUsername() async {
@@ -49,7 +60,26 @@ class MusicApiService {
     return false;
   }
 
-  /// Fetches song details for a single song name and returns a SongDetails object.
+  // Save expiration time persistently
+  Future<void> _saveExpireTime(int expireTime) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('expireTime', expireTime);
+  }
+
+  // Retrieve expiration time from SharedPreferences
+  Future<int?> _getExpireTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('expireTime');
+  }
+
+  Future<void> _restoreExpireTime() async {
+    final storedExpireTime = await _getExpireTime();
+    if (storedExpireTime != null) {
+      _expireTime = storedExpireTime; // Set the stored expire time
+      print('Expire time restored: $_expireTime');
+    }
+  }
+
   Future<SongDetails?> fetchSongDetails(String songName) async {
     final client = http.Client();
     final uri = Uri.parse('$baseUrl/get_song');
@@ -67,7 +97,28 @@ class MusicApiService {
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
         if (data.isNotEmpty) {
-          return SongDetails.fromJson(data);
+          final songDetails = SongDetails.fromJson(data);
+
+          // Store the song in the history list
+          _songHistory.add(songDetails);
+
+          // Assuming the SongDetails object contains a property 'audioUrl'
+          String expireAudioToken = songDetails.audioUrl;
+
+          // Extract expire time from the audio URL
+          int? expireTime = extractExpireTimeFromUrl(expireAudioToken);
+
+          // Store the expire time if it's found
+          if (expireTime != null) {
+            _expireTime = expireTime;
+            await _saveExpireTime(
+                _expireTime!); // Save expire time to SharedPreferences
+          }
+
+          // Print time left
+          print('Time left: ${timeLeft}'); // Use the timeLeft getter to print
+
+          return songDetails;
         }
       }
     } catch (e) {
@@ -76,6 +127,86 @@ class MusicApiService {
       client.close();
     }
     return null;
+  }
+
+  // EXPIRE TIME CALCULATOR (single method)
+  int? extractExpireTimeFromUrl(String audioUrl) {
+    if (audioUrl.isEmpty) return null; // Guard clause to check empty audioUrl
+
+    final regex = RegExp(r"expire=(\d+)");
+    final match = regex.firstMatch(audioUrl);
+
+    return match != null && match.groupCount > 0
+        ? int.tryParse(match.group(1) ?? "")
+        : null;
+  }
+
+  // Getter for timeLeft that converts expireTime to a human-readable format
+  String get timeLeft {
+    if (_expireTime == null) {
+      return 'Expire time not set';
+    }
+
+    DateTime expireDate =
+        DateTime.fromMillisecondsSinceEpoch(_expireTime! * 1000);
+    DateTime currentDate = DateTime.now();
+    Duration difference = expireDate.difference(currentDate);
+
+    if (difference.isNegative) {
+      // If expired, remove the song from history
+      _removeExpiredSong();
+      return 'Expired';
+    } else {
+      int days = difference.inDays;
+      int hours = difference.inHours % 24;
+      int minutes = difference.inMinutes % 60;
+
+      String timeLeft = '';
+      if (days > 0) timeLeft += '$days Days ';
+      if (hours > 0) timeLeft += '$hours Hrs ';
+      if (minutes > 0) timeLeft += '$minutes Min';
+      return timeLeft.trim();
+    }
+  }
+
+  // Method to remove expired song from history
+  void _removeExpiredSong() {
+    if (_songHistory.isNotEmpty) {
+      // Assuming the first song in the history list is the one being checked
+      _songHistory.removeAt(0); // Remove the expired song
+      print('Song removed from history due to expiration');
+    }
+  }
+
+  // Start a timer to periodically check song expiration
+  void _startExpireCheck() {
+    _expireCheckTimer = Timer.periodic(Duration(minutes: 1), (timer) {
+      print('Checking for expired songs...');
+
+      // Check each song in the history for expiration
+      List<SongDetails> expiredSongs = [];
+      for (var song in _songHistory) {
+        final expireTime = extractExpireTimeFromUrl(song.audioUrl);
+        if (expireTime != null &&
+            DateTime.now().isAfter(
+                DateTime.fromMillisecondsSinceEpoch(expireTime * 1000))) {
+          // If the song has expired, mark it for removal
+          expiredSongs.add(song);
+        }
+      }
+
+      // Remove expired songs
+      if (expiredSongs.isNotEmpty) {
+        _songHistory.removeWhere((song) => expiredSongs.contains(song));
+        print('Removed expired songs from history.');
+      }
+    });
+  }
+
+  // Method to cancel the timer (if needed)
+  void cancelExpireCheck() {
+    _expireCheckTimer?.cancel();
+    print('Expire check timer cancelled.');
   }
 
   Future<List<SongDetails>> fetchRelatedSongs(
@@ -101,25 +232,17 @@ class MusicApiService {
       print("Raw response body: ${response.body}");
 
       if (response.statusCode == 200) {
-        // Parse the response and handle the data
         final List<dynamic> data = json.decode(response.body);
-
-        // Debugging: Log the decoded data to verify it matches expectations
-        print("Decoded response data: $data");
-
-        if (data.isNotEmpty) {
-          _relatedSongsQueue =
-              data.map((song) => SongDetails.fromJson(song)).toList();
-          print(
-              "Fetched related songs successfully: ${_relatedSongsQueue.length} songs");
-          return _relatedSongsQueue;
-        } else {
-          print("No related songs found for song: $songName by $artistName");
-          return [];
+        if (data.isEmpty) {
+          print("No related songs found.");
+          return []; // Return empty list if no related songs are found
         }
+        _relatedSongsQueue =
+            data.map((song) => SongDetails.fromJson(song)).toList();
+        return _relatedSongsQueue;
       } else {
         print("Failed to fetch related songs: ${response.statusCode}");
-        return [];
+        return []; // Return empty list if the request fails
       }
     } catch (e) {
       print("Error fetching related songs: $e");

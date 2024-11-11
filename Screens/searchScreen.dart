@@ -2,12 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
-import '../../Services/musicApiService.dart';
 import 'playerScreen.dart';
 import 'likedSongs.dart';
 import 'miniplayer.dart'; // Import MiniPlayer
-import '../../Services/AudioProvider.dart'; // Ensure AudioProvider is imported
+import '../Services/AudioProvider.dart'; // Ensure AudioProvider is imported
 import 'package:provider/provider.dart';
+import 'historyScreen.dart'; // Import the HistoryScreen widget
+import '../Services/musicApiService.dart'; // use lowercase 'm'
 
 class SongSearchScreen extends StatefulWidget {
   const SongSearchScreen({super.key});
@@ -139,6 +140,19 @@ class _SongSearchScreenState extends State<SongSearchScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const LikedSongsScreen(),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.history, color: Colors.green),
+                onPressed: () {
+                  // Navigate to HistoryScreen with the correct variable name
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          HistoryScreen(musicApiService: _musicApiService),
                     ),
                   );
                 },
