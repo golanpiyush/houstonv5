@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:houstonv8/Services/AudioProvider.dart';
 import 'package:provider/provider.dart';
-import '../Services/AudioProvider.dart';
 import '../Screens/playerScreen.dart';
 import '../Services/SongDetails.dart';
 import 'package:auto_size_text/auto_size_text.dart';
@@ -62,13 +62,11 @@ class MiniPlayer extends StatelessWidget {
                 audioProvider.currentAlbumArtUrl ?? '');
           }
 
-          // Update the previous song details in AudioProvider
           audioProvider.updatePreviousSongDetails(
-            audioProvider.currentSongTitle,
-            audioProvider.currentArtist,
-            audioProvider.currentAudioUrl,
+            title: audioProvider.previousSongTitle,
+            artist: audioProvider.previousArtist,
+            audioUrl: audioProvider.previousAudioUrl,
           );
-
           // Navigate to PlayerScreen
           Navigator.push(
               context,

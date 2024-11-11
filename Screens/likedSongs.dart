@@ -1,11 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:houstonv8/Services/AudioProvider.dart';
 import '../Services/StorageService.dart';
 import '../Services/SongDetails.dart';
 import 'PlayerScreen.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../Services/AudioProvider.dart';
 import 'miniplayer.dart'; // Ensure you have the MiniPlayer import
 import 'package:provider/provider.dart';
 

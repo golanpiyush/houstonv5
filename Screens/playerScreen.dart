@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:houstonv8/Services/SongDetails.dart';
 import 'package:provider/provider.dart';
-import '../Services/AudioProvider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../Services/StorageService.dart';
 import 'dart:io';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-
+import '../Services/AudioProvider.dart';
 import 'dart:async';
 
 class PlayerScreen extends StatefulWidget {
@@ -226,7 +225,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _buildAlbumArtContainer(AudioProvider audioProvider) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 1000),
+      curve: Curves
+          .easeInOutQuint, // Set the animation curve for smooth transition
       width: 340,
       height: 340,
       decoration: BoxDecoration(
@@ -250,19 +252,22 @@ class _PlayerScreenState extends State<PlayerScreen>
     double? dragStartX;
 
     return GestureDetector(
-      onTap: () => audioProvider.togglePlayPause(),
+      onTap: () => audioProvider.togglePlayPause(), // Toggle Play/Pause on tap
       onHorizontalDragStart: (details) {
-        dragStartX = details.localPosition.dx;
+        dragStartX =
+            details.localPosition.dx; // Capture the starting point of the drag
       },
       onHorizontalDragEnd: (details) {
         if (dragStartX != null) {
           final dragDistance = details.localPosition.dx - dragStartX!;
-          const threshold = 40.0;
+          const threshold = 20.0; // Threshold for detecting drag distance
+
           if (dragDistance.abs() > threshold) {
+            // If the drag distance exceeds the threshold, handle song change
             _handleSongChange(dragDistance < 0, audioProvider);
           }
         }
-        dragStartX = null;
+        dragStartX = null; // Reset the drag start position
       },
       child: Stack(
         alignment: Alignment.center,
@@ -331,13 +336,15 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildProgressBar(AudioProvider audioProvider) {
     return Slider(
-      value: audioProvider.position.inMilliseconds
-          .toDouble()
-          .clamp(0, (audioProvider.duration?.inMilliseconds.toDouble() ?? 1)),
-      min: 0,
-      max: (audioProvider.duration?.inMilliseconds.toDouble() ?? 1),
+      value: audioProvider.sliderPosition.inSeconds.toDouble(),
+      max: audioProvider.duration?.inSeconds.toDouble() ?? 0.0,
       onChanged: (value) {
-        audioProvider.seekTo(Duration(milliseconds: value.toInt()));
+        // Update the slider position through the new setSliderPosition method
+        audioProvider.setSliderPosition(Duration(seconds: value.toInt()));
+      },
+      onChangeEnd: (value) {
+        // Seek to the new position when the user finishes dragging the slider
+        audioProvider.seekTo(Duration(seconds: value.toInt()));
       },
       activeColor: audioProvider.vibrantColor,
       inactiveColor: Colors.white30,
