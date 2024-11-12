@@ -151,7 +151,7 @@ class HistoryScreen extends StatelessWidget {
                               children: [
                                 // Show the time left until the song expires
                                 AutoSizeText(
-                                  'Expires in: ${musicApiService.timeLeft}',
+                                  'Expires in: ${song.timeLeft}',
                                   style: TextStyle(
                                     fontFamily: 'Montserrat',
                                     fontWeight: FontWeight.w100,
