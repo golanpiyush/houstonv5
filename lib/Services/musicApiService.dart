@@ -1,61 +1,10 @@
 import 'dart:convert';
 import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:houstonv8/Services/RelatedSongsData.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SongDetails.dart';
-
-class RelatedSongs {
-  final List<SongDetails> songs;
-  final Map<String, dynamic>? currentSong;
-
-  RelatedSongs(this.songs, {this.currentSong});
-
-  // Get a list of song titles
-  List<String> getSongTitles() {
-    return songs.map((song) => song.title).toList();
-  }
-
-  // Get the entire list of song details
-  List<SongDetails> getAllSongs() {
-    return songs;
-  }
-
-  // Get the next song based on the current index
-  SongDetails? getNextSong(int currentIndex) {
-    if (currentIndex >= 0 && currentIndex < songs.length - 1) {
-      return songs[currentIndex + 1]; // Get the next song
-    }
-    return null;
-  }
-
-  // Add a song to the queue
-  void addSong(SongDetails song) {
-    songs.add(song);
-  }
-
-  // Remove a song from the queue
-  void removeSong(SongDetails song) {
-    songs.remove(song);
-  }
-
-  // Clear the song queue
-  void clear() {
-    songs.clear();
-  }
-
-  // Factory method to create RelatedSongs from the API response data
-  factory RelatedSongs.fromJson(Map<String, dynamic> jsonData) {
-    List<SongDetails> songList = [];
-    for (var songData in jsonData['related_songs']) {
-      songList.add(SongDetails.fromJson(songData));
-    }
-    return RelatedSongs(
-      songList,
-      currentSong:
-          jsonData['current_song'], // Store current song data if available
-    );
-  }
-}
 
 class MusicApiService {
   final String baseUrl;
@@ -64,6 +13,9 @@ class MusicApiService {
       []; // Song history list to display on the history screen
   final Map<String, Timer> _expireTimers =
       {}; // Timer for each song to track expiration
+  final StreamController<RelatedSongData> _relatedSongsController =
+      StreamController<
+          RelatedSongData>.broadcast(); // Controller to stream related songs
 
   MusicApiService({required this.baseUrl}) {
     _restoreSongHistory(); // Restore song history and timers on initialization
@@ -71,6 +23,14 @@ class MusicApiService {
 
   // Getter for song history
   List<SongDetails> get songHistory => _songHistory;
+
+  // Getter for related songs stream
+  Stream<RelatedSongData> get relatedSongsStream =>
+      _relatedSongsController.stream;
+  final RelatedSongsQueue _relatedSongsQueue = RelatedSongsQueue(); // Add this
+
+  // Add a getter for the queue
+  RelatedSongsQueue get relatedSongsQueue => _relatedSongsQueue;
 
   Future<String?> _getUsername() async {
     final prefs = await SharedPreferences.getInstance();
@@ -114,6 +74,9 @@ class MusicApiService {
 
   Future<SongDetails?> fetchSongDetails(
       String songName, String username) async {
+    // Reset the related songs queue at the start of fetching a new song
+    RelatedSongsQueue().reset();
+
     final client = http.Client();
     final uri = Uri.parse('$baseUrl/get_song');
     final headers = await _getHeaders();
@@ -132,12 +95,15 @@ class MusicApiService {
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
 
-        // Check if the server response contains `song_details`
+        // Check if the server response contains song_details
         if (data.containsKey('song_details') && data['song_details'] != null) {
           print('Parsing song_details: ${data['song_details']}');
 
           // Parse the main song details
           final songDetails = SongDetails.fromJson(data['song_details']);
+
+          // Extract session_id from the response if available
+          final String sessionId = data['session_id'] ?? '';
 
           // Handle expireTime logic if necessary
           int? expireTime = extractExpireTimeFromUrl(songDetails.audioUrl);
@@ -164,7 +130,10 @@ class MusicApiService {
             await _saveSongHistory(); // Save song details to history
           }
 
-          return songDetails;
+          // Start listening to related songs asynchronously
+          _listenToRelatedSongs(headers, songDetails, sessionId);
+
+          return songDetails; // Return the song details immediately
         } else {
           print('No song_details found in the response.');
         }
@@ -177,20 +146,64 @@ class MusicApiService {
     return null;
   }
 
-  // manual history song remover fucntion
+  // The method to listen to related songs via SSE
+  Future<void> _listenToRelatedSongs(Map<String, String> headers,
+      SongDetails songDetails, String sessionId) async {
+    final uri = Uri.parse('$baseUrl/stream_related_songs/$sessionId');
+    final request = http.Request('GET', uri)..headers.addAll(headers);
 
-  // void _removeExpiredSong(SongDetails song) {
-  //   if (_songHistory.contains(song)) {
-  //     _songHistory.remove(song); // Remove the expired song from history
-  //     _saveSongHistory(); // Save the updated history
-  //     print('Expired song removed from history');
-  //   }
-  // }
+    try {
+      final response = await request.send();
 
-  int? extractExpireTimeFromUrl(String audioUrl) {
-    final regex = RegExp(r"expire=(\d+)");
-    final match = regex.firstMatch(audioUrl);
-    return match != null ? int.tryParse(match.group(1) ?? "") : null;
+      response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((String line) {
+        if (line.startsWith('data: ')) {
+          final data = line.substring(6);
+          debugPrint("Raw SSE data: $data");
+
+          try {
+            final json = jsonDecode(data);
+            // Check if this is a song data message (has title field)
+            if (json.containsKey('title')) {
+              debugPrint("Processing song data: $json");
+              final relatedSong = RelatedSongData.fromJson(json);
+
+              // Prevent duplicates by checking if the song with the same title and artist already exists in the queue
+              if (!_relatedSongsQueue.songs.any((song) =>
+                  song.title == relatedSong.title &&
+                  song.artists == relatedSong.artists)) {
+                // Add to both stream and queue
+                _relatedSongsController.add(relatedSong);
+                _relatedSongsQueue.addSong(relatedSong);
+
+                debugPrint(
+                    "Added song to queue: ${relatedSong.title}. Queue size: ${_relatedSongsQueue.length}");
+              } else {
+                debugPrint(
+                    "Duplicate song detected: ${relatedSong.title} by ${relatedSong.artists}");
+              }
+            } else if (json['message'] == "Related songs processing complete") {
+              debugPrint(
+                  "Related songs processing complete. Final queue size: ${_relatedSongsQueue.length}");
+            }
+          } catch (e, stackTrace) {
+            debugPrint("Error parsing SSE data: $e");
+            debugPrint("Stack trace: $stackTrace");
+          }
+        }
+      }, onError: (error) {
+        debugPrint("SSE Error: $error");
+      }, onDone: () {
+        debugPrint(
+            "SSE stream closed. Final queue size: ${_relatedSongsQueue.length}");
+        debugPrint(
+            "Queue size after processing complete: ${_relatedSongsQueue.length}");
+      });
+    } catch (error) {
+      debugPrint("Request failed: $error");
+    }
   }
 
   // Set an expiration timer for each song, and update the timer if expireTime changes
@@ -256,59 +269,6 @@ class MusicApiService {
     }
   }
 
-  Future<List<RelatedSong>> fetchRelatedSongs() async {
-    final uri = Uri.parse('$baseUrl/related_tracks');
-    final headers = await _getHeaders();
-
-    // List to hold related songs
-    List<RelatedSong> allSongs = [];
-
-    try {
-      final response = await http
-          .get(
-            uri,
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 60));
-
-      if (response.statusCode == 200) {
-        // Debug raw JSON response
-        print("Raw server response:");
-        print(response.body);
-
-        // Decode JSON
-        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-        if (jsonResponse.containsKey('related_songs')) {
-          final List<dynamic> songsJson = jsonResponse['related_songs'];
-
-          // Add new songs to the existing list incrementally
-          for (var song in songsJson) {
-            RelatedSong newSong = RelatedSong.fromJson(song);
-            allSongs.add(newSong);
-
-            // Debug print each new song as it's added
-            print("Added song: $newSong");
-          }
-
-          print("Total related songs: ${allSongs.length}");
-          return allSongs;
-        } else {
-          print("Error: 'related_songs' key not found in response.");
-        }
-      } else {
-        print(
-            "Failed to fetch related songs. Status code: ${response.statusCode}");
-        print("Response body: ${response.body}");
-      }
-    } catch (e, stackTrace) {
-      print("Error fetching related songs: $e");
-      print("Stack trace: $stackTrace");
-    }
-
-    return allSongs;
-  }
-
   // Cancel all timers when the service is disposed
   void cancelAllTimers() {
     for (var timer in _expireTimers.values) {
@@ -316,5 +276,12 @@ class MusicApiService {
     }
     _expireTimers.clear();
     print("All expiration timers cancelled.");
+  }
+
+  // Extract expiration time from the audio URL
+  int? extractExpireTimeFromUrl(String audioUrl) {
+    final regex = RegExp(r"expire=(\d+)");
+    final match = regex.firstMatch(audioUrl);
+    return match != null ? int.tryParse(match.group(1) ?? "") : null;
   }
 }

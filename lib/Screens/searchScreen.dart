@@ -190,10 +190,12 @@ class _SongSearchScreenState extends State<SongSearchScreen>
   Future<void> _loadLikedSongs() async {
     try {
       final songs = await _storageService.getLikedSongs();
-      setState(() {
-        _likedSongs = songs;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _likedSongs = songs;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       print('Error loading liked songs: $e');
       setState(() {

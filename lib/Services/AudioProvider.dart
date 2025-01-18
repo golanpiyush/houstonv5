@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:houstonv8/Services/PaletteGeneratorService.dart';
+import 'package:houstonv8/Services/RelatedSongsData.dart';
 import 'package:houstonv8/Services/StorageService.dart';
 import 'package:houstonv8/Services/musicApiService.dart';
 import 'package:just_audio/just_audio.dart';
@@ -8,16 +9,16 @@ import 'dart:async';
 import 'package:just_audio_background/just_audio_background.dart';
 
 /// Class to manage related songs queue
-
 class AudioProvider with ChangeNotifier {
   // Constants
-
   static const int _maxSongsBeforeReset = 13;
 
   // Services
   final AudioPlayer _audioPlayer = AudioPlayer();
   final StorageService _storageService = StorageService();
   final PaletteGeneratorService _paletteService = PaletteGeneratorService();
+  final RelatedSongsQueue _relatedSongsQueue = RelatedSongsQueue();
+  StreamSubscription<RelatedSongData>? _relatedSongsSubscription;
 
   // State management
   bool isPlaying = false;
@@ -25,7 +26,8 @@ class AudioProvider with ChangeNotifier {
   bool _isLooping = false;
   bool isChangingSong = false;
   bool _isPlayerScreenVisible = false;
-  final bool _isLoadingRelatedSongs = false;
+  bool _isLoadingRelatedSongs = false;
+  bool showEmptyQueueMessage = false;
 
   // Current playback state
   Duration position = Duration.zero;
@@ -38,7 +40,6 @@ class AudioProvider with ChangeNotifier {
   StreamSubscription<bool>? _playingSubscription;
 
   // Song queue management
-  List<SongDetails>? _relatedSongsQueue;
   int _currentRelatedSongIndex = 0;
   int _songsPlayedOrSkipped = 0;
 
@@ -65,9 +66,21 @@ class AudioProvider with ChangeNotifier {
     _initializeAudioPlayer();
   }
 
-  // Update the initialization to handle network songs differently
+  /// Ensure playback starts only after the queue is ready
+  void startPlaybackAfterQueueReady() {
+    debugPrint('Queue size before check: ${_relatedSongsQueue.length}');
+    if (_relatedSongsQueue.isEmpty) {
+      debugPrint('Queue is empty. Waiting for songs...');
+      // Optionally, handle the empty queue scenario
+    } else if (!isPlaying) {
+      // Start playback only if not already playing
+      debugPrint('Queue is already populated. Starting playback.');
+      nextSong();
+    }
+  }
+
+  /// Initialize audio player and listeners
   void _initializeAudioPlayer() {
-    // Playing state listener
     _playingSubscription = _audioPlayer.playingStream.listen((playing) {
       isPlaying = playing;
       notifyListeners();
@@ -77,55 +90,24 @@ class AudioProvider with ChangeNotifier {
       notifyListeners();
     });
 
-    // Processing state listener with network audio check
     _audioPlayer.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
-        // markSongAsPlayedOrSkipped();
-        // nextSong();
-
-        // Only auto-play next song if it's not a network audio
-        if (!_isNetworkAudio) {
-          // if (_relatedSongsQueue == null) {
-          //   // Corrected comparison (== instead of =)
-          //   print('fetching and playing');
-          //   fetchAndCacheRelatedSongs();
-          // }
-
-          markSongAsPlayedOrSkipped();
-          nextSong();
-          // _handleNextNetworkSong();
-        } else {
-          markSongAsPlayedOrSkipped();
-          _handleNextNetworkSong();
-        }
+        markSongAsPlayedOrSkipped();
+        nextSong();
       }
       notifyListeners();
     });
 
-    // Position listener with more frequent updates
     _initializePositionListener();
   }
 
-  // Position listener with related songs fetching logic
+  /// Position listener for playback
   void _initializePositionListener() {
     _positionSubscription?.cancel();
     _positionSubscription = _audioPlayer.positionStream.listen((newPosition) {
       if (isChangingSong) return;
       position = newPosition;
       sliderPosition = newPosition;
-
-      // Check if we should fetch related songs (after 10 seconds)
-      // if (_isNetworkAudio &&
-      //     newPosition.inSeconds >= 10 &&
-      //     !_isLoadingRelatedSongs &&
-      //     !_hasFetchedRelatedSongs) {
-      //   _isLoadingRelatedSongs = true;
-      //   fetchAndCacheRelatedSongs().then((_) {
-      //     _isLoadingRelatedSongs = false;
-      //     _hasFetchedRelatedSongs = true;
-      //   });
-      // }
-
       notifyListeners();
     });
   }
@@ -188,8 +170,7 @@ class AudioProvider with ChangeNotifier {
     notifyListeners();
   }
 
-// Related Songs Management
-
+  // Related Songs Management
   void markSongAsPlayedOrSkipped() {
     _songsPlayedOrSkipped++;
     if (_songsPlayedOrSkipped >= _maxSongsBeforeReset) {
@@ -201,12 +182,11 @@ class AudioProvider with ChangeNotifier {
     if (_audioPlayer.processingState != ProcessingState.idle) {
       _currentRelatedSongIndex = 0;
       _songsPlayedOrSkipped = 0;
-      _relatedSongsQueue = [];
       notifyListeners();
     }
   }
 
-// Navigation Methods
+  // Navigation Methods
   Future<void> previousSong() async {
     if (_isNetworkAudio) {
       return;
@@ -230,46 +210,7 @@ class AudioProvider with ChangeNotifier {
     }
   }
 
-  Future<List<SongDetails>> fetchAndCacheRelatedSongs() async {
-    // Check if related songs are already cached
-    if (_relatedSongsQueue != null && _relatedSongsQueue!.isNotEmpty) {
-      print("Returning related songs from cache...");
-      return _relatedSongsQueue!;
-    }
-
-    try {
-      // Fetch related songs from API
-      final MusicApiService apiService = MusicApiService(
-        baseUrl: 'https://hhlxm0tg-5000.inc1.devtunnels.ms/',
-      );
-      final List<RelatedSong> relatedSongs =
-          await apiService.fetchRelatedSongs(); // Call instance method
-
-      // Convert RelatedSong to SongDetails
-      final List<SongDetails> songDetailsList = relatedSongs.map((song) {
-        return SongDetails(
-          title: song.title,
-          artists: song.artists,
-          albumArt: song.album_art,
-          audioUrl: song.audio_url,
-        );
-      }).toList();
-
-      // Cache the songs if any are fetched
-      if (songDetailsList.isNotEmpty) {
-        _relatedSongsQueue = songDetailsList; // Store in cache
-        print("Caching related songs...");
-      }
-
-      // Ensure that _relatedSongsQueue is non-null when returning
-      return _relatedSongsQueue ?? []; // Return an empty list if it's null
-    } catch (e) {
-      print("Error fetching related songs: $e");
-      return []; // Return empty list if something goes wrong
-    }
-  }
-
-// Helper Methods
+  // Helper Methods
   bool get _isNetworkAudio =>
       currentAudioUrl != null &&
       (currentAudioUrl!.startsWith('http://') ||
@@ -280,30 +221,56 @@ class AudioProvider with ChangeNotifier {
         song['title'] == currentSongTitle && song['artist'] == currentArtist);
   }
 
+  /// Handle the next song in the queue
   Future<void> _handleNextNetworkSong() async {
-    if (_relatedSongsQueue?.isEmpty ?? true) {
-      await fetchAndCacheRelatedSongs();
+    // Check if the related songs queue is empty
+    if (_relatedSongsQueue.isEmpty) {
+      debugPrint('Queue is empty. No songs to play.');
       return;
     }
 
-    if (_currentRelatedSongIndex == 4) {
-      await fetchAndCacheRelatedSongs();
+    // Inspect the queue and song data
+    debugPrint('Related Songs Queue: $_relatedSongsQueue');
+
+    // Get the next song from the queue
+    final RelatedSongData? nextSong = _relatedSongsQueue.getNextSong();
+
+    if (nextSong == null) {
+      debugPrint('No more songs in the queue.');
+      return;
     }
 
-    final nextSong = _relatedSongsQueue![_currentRelatedSongIndex];
-    _currentRelatedSongIndex =
-        (_currentRelatedSongIndex + 1) % _relatedSongsQueue!.length;
+    // Inspect nextSong data
+    debugPrint('Next Song: ${nextSong.title}, Audio URL: ${nextSong.audioUrl}');
 
-    // Update current song details before playing
-    setCurrentSongDetails(nextSong);
+    try {
+      debugPrint('Playing next network song: ${nextSong.title}');
 
-    await playSong(
-      nextSong.audioUrl,
-      nextSong.albumArt,
-      title: nextSong.title,
-      artist: nextSong.artists,
-    );
-    notifyListeners();
+      // Set current song details for the player
+      setCurrentSongDetails(SongDetails(
+        title: nextSong.title,
+        artists: nextSong.artists,
+        albumArt: nextSong.albumArt,
+        audioUrl: nextSong.audioUrl,
+      ));
+
+      // Play the song
+      await playSong(
+        nextSong.audioUrl,
+        nextSong.albumArt,
+        title: nextSong.title,
+        artist: nextSong.artists,
+      );
+
+      debugPrint('Next song URL: ${nextSong.audioUrl}');
+
+      notifyListeners(); // Notify listeners about the state change
+    } catch (e) {
+      debugPrint('Error playing next network song: $e');
+
+      // Optional: Skip to the next song in case of failure
+      await _handleNextNetworkSong(); // Recursively attempt to play the next song
+    }
   }
 
   Future<void> _handleNextLocalSong() async {
@@ -329,13 +296,11 @@ class AudioProvider with ChangeNotifier {
 
   /// Clears the queue of related songs
   void clearRelatedSongs() {
-    _relatedSongsQueue = [];
     _currentRelatedSongIndex = 0;
     notifyListeners();
   }
 
   /// Updates the previous song details for history tracking
-  /// This is useful for implementing "recently played" or back navigation features
   void updatePreviousSongDetails({
     required String? title,
     required String? artist,
@@ -344,7 +309,6 @@ class AudioProvider with ChangeNotifier {
     previousSongTitle = title;
     previousArtist = artist;
     previousAudioUrl = audioUrl;
-    // No need to notify listeners as this is internal state that doesn't affect UI
   }
 
   // Update playSong method to ensure MediaItem is properly set
@@ -355,7 +319,6 @@ class AudioProvider with ChangeNotifier {
       position = Duration.zero;
       sliderPosition = Duration.zero;
 
-      // Use the current song details that were set earlier
       String newTitle = title ?? currentSongTitle ?? "Unknown Title";
       String newArtist = artist ?? currentArtist ?? "Unknown Artist";
 
@@ -366,9 +329,7 @@ class AudioProvider with ChangeNotifier {
       Uri? artUri = _createArtUri(albumArtPath);
 
       _currentMediaItem = MediaItem(
-        id: DateTime.now()
-            .millisecondsSinceEpoch
-            .toString(), // Unique ID for each song
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
         album: newArtist,
         title: newTitle,
         artUri: artUri,
@@ -436,6 +397,8 @@ class AudioProvider with ChangeNotifier {
     _durationSubscription?.cancel();
     _playingSubscription?.cancel();
     _colorLoadingTimer?.cancel();
+    _relatedSongsSubscription?.cancel();
+    _relatedSongsQueue.clear();
     super.dispose();
   }
 }
