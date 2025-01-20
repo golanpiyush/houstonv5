@@ -2,16 +2,54 @@ import 'package:flutter/material.dart';
 import 'package:houstonv8/Services/PaletteGeneratorService.dart';
 import 'package:houstonv8/Services/RelatedSongsData.dart';
 import 'package:houstonv8/Services/StorageService.dart';
-import 'package:houstonv8/Services/musicApiService.dart';
 import 'package:just_audio/just_audio.dart';
 import 'SongDetails.dart';
 import 'dart:async';
 import 'package:just_audio_background/just_audio_background.dart';
 
-/// Class to manage related songs queue
+class CurrentSong {
+  final String title;
+  final String artist;
+  final String url;
+  final String? albumArt;
+  final bool isLiked;
+  final String? key;
+
+  CurrentSong({
+    required this.title,
+    required this.artist,
+    required this.url,
+    this.albumArt,
+    this.isLiked = false,
+    this.key,
+  });
+}
+
+extension CurrentSongExtension on CurrentSong {
+  CurrentSong copyWith({
+    String? title,
+    String? artist,
+    String? url,
+    String? albumArt,
+    bool? isLiked,
+    String? key,
+  }) {
+    return CurrentSong(
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      url: url ?? this.url,
+      albumArt: albumArt ?? this.albumArt,
+      isLiked: isLiked ?? this.isLiked,
+      key: key ?? this.key,
+    );
+  }
+}
+
+/// Class to manage audio related services
 class AudioProvider with ChangeNotifier {
   // Constants
   static const int _maxSongsBeforeReset = 13;
+  CurrentSong? _currentSong;
 
   // Services
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -40,10 +78,11 @@ class AudioProvider with ChangeNotifier {
   StreamSubscription<bool>? _playingSubscription;
 
   // Song queue management
-  int _currentRelatedSongIndex = 0;
   int _songsPlayedOrSkipped = 0;
 
   // Current song details
+  CurrentSong? get currentSong => _currentSong;
+
   String? currentAudioUrl;
   String? currentSongTitle;
   String? currentArtist;
@@ -118,12 +157,27 @@ class AudioProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void setCurrentSongDetails(SongDetails songDetails) {
+  Future<void> setCurrentSongDetails(SongDetails songDetails) async {
     currentSongTitle = songDetails.title;
     currentArtist = songDetails.artists;
     currentAlbumArtUrl = songDetails.albumArt;
     currentAudioUrl = songDetails.audioUrl;
     currentPlayingSongKey = "${songDetails.artists}-${songDetails.title}";
+
+    final isLiked = await _storageService.isSongLiked(
+      songDetails.title,
+      songDetails.artists,
+    );
+
+    _currentSong = CurrentSong(
+      title: songDetails.title,
+      artist: songDetails.artists,
+      url: songDetails.audioUrl,
+      albumArt: songDetails.albumArt,
+      isLiked: isLiked,
+      key: currentPlayingSongKey,
+    );
+
     notifyListeners();
   }
 
@@ -135,6 +189,124 @@ class AudioProvider with ChangeNotifier {
   void setPlayerScreenVisible(bool isVisible) {
     _isPlayerScreenVisible = isVisible;
     notifyListeners();
+  }
+
+  Future<CurrentSong?> getCurrentSongDetails() async {
+    if (currentSongTitle == null ||
+        currentArtist == null ||
+        currentAudioUrl == null) {
+      return null;
+    }
+
+    final isLiked = await _storageService.isSongLiked(
+      currentSongTitle!,
+      currentArtist!,
+    );
+
+    return CurrentSong(
+      title: currentSongTitle!,
+      artist: currentArtist!,
+      url: currentAudioUrl!,
+      albumArt: currentAlbumArtUrl,
+      isLiked: isLiked,
+      key: currentPlayingSongKey,
+    );
+  }
+
+  /// Toggle like status for current song
+  Future<void> toggleLikeCurrentSong() async {
+    if (currentSongTitle == null ||
+        currentArtist == null ||
+        currentAudioUrl == null ||
+        currentAlbumArtUrl == null) {
+      return;
+    }
+
+    final isLiked = await _storageService.isSongLiked(
+      currentSongTitle!,
+      currentArtist!,
+    );
+
+    try {
+      if (isLiked) {
+        await _storageService.unlikeSong(
+          currentSongTitle!,
+          currentArtist!,
+        );
+      } else {
+        await _storageService.likeSong(
+          title: currentSongTitle!,
+          artist: currentArtist!,
+          albumArtUrl: currentAlbumArtUrl!,
+          audioUrl: currentAudioUrl!,
+        );
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error toggling like status: $e');
+      // Optionally handle the error (show a snackbar, etc.)
+    }
+  }
+
+  /// Handle unliking the current song
+  Future<void> unlikeCurrentSong() async {
+    if (currentSongTitle == null || currentArtist == null) return;
+
+    try {
+      // Use existing StorageService unlikeSong method
+      await _storageService.unlikeSong(
+        currentSongTitle!,
+        currentArtist!,
+      );
+
+      // Update current song state
+      if (_currentSong != null) {
+        _currentSong = CurrentSong(
+          title: _currentSong!.title,
+          artist: _currentSong!.artist,
+          url: _currentSong!.url,
+          albumArt: _currentSong!.albumArt,
+          isLiked: false,
+          key: _currentSong!.key,
+        );
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error unliking current song: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> unlikeSong({
+    required String title,
+    required String artist,
+    Function? onStart,
+    Function? onSuccess,
+    Function(String)? onError,
+  }) async {
+    try {
+      // Notify start of unlike process
+      onStart?.call();
+
+      // Check if this is the currently playing song
+      if (currentSongTitle == title && currentArtist == artist) {
+        // Update current song's like status
+        _currentSong = _currentSong?.copyWith(isLiked: false);
+      }
+
+      // Unlike the song using storage service
+      await _storageService.unlikeSong(title, artist);
+
+      // Notify success
+      onSuccess?.call();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error unliking song: $e');
+      onError?.call('Failed to unlike song: ${e.toString()}');
+      // Re-throw to allow UI to handle error if needed
+      rethrow;
+    }
   }
 
   // Playback Control Methods
@@ -180,7 +352,6 @@ class AudioProvider with ChangeNotifier {
 
   void resetRelatedSongs() {
     if (_audioPlayer.processingState != ProcessingState.idle) {
-      _currentRelatedSongIndex = 0;
       _songsPlayedOrSkipped = 0;
       notifyListeners();
     }
@@ -189,6 +360,12 @@ class AudioProvider with ChangeNotifier {
   // Navigation Methods
   Future<void> previousSong() async {
     if (_isNetworkAudio) {
+      // If it's a network audio, handle it (you may want to fetch from the history or queue)
+      final previousSong = _relatedSongsQueue.getPreviousSong();
+      if (previousSong != null) {
+        // Handle playing the previous network song
+        await _playNetworkSong(previousSong);
+      }
       return;
     }
 
@@ -199,7 +376,34 @@ class AudioProvider with ChangeNotifier {
     int previousIndex =
         (currentIndex - 1 + likedSongs.length) % likedSongs.length;
 
-    await _playLikedSong(likedSongs[previousIndex]);
+    await playLikedSong(likedSongs[previousIndex]);
+  }
+
+  Future<void> _playNetworkSong(RelatedSongData previousSong) async {
+    try {
+      // Set the current song details using RelatedSongData
+      currentSongTitle = previousSong.title;
+      currentArtist = previousSong.artists;
+      currentAlbumArtUrl = previousSong.albumArt;
+      currentAudioUrl = previousSong.audioUrl;
+      currentPlayingSongKey = "${previousSong.artists}-${previousSong.title}";
+
+      // Update the UI
+      notifyListeners();
+
+      // Play the song directly from RelatedSongData
+      await playSong(
+        previousSong.audioUrl,
+        previousSong.albumArt,
+        title: previousSong.title,
+        artist: previousSong.artists,
+      );
+      debugPrint('Now playing song: ${currentSongTitle}');
+
+      debugPrint('Playing previous network song: ${previousSong.title}');
+    } catch (e) {
+      debugPrint('Error playing previous network song: $e');
+    }
   }
 
   Future<void> nextSong() async {
@@ -280,23 +484,35 @@ class AudioProvider with ChangeNotifier {
     int currentIndex = _findCurrentSongIndex(likedSongs);
     int nextIndex = (currentIndex + 1) % likedSongs.length;
 
-    await _playLikedSong(likedSongs[nextIndex]);
+    await playLikedSong(likedSongs[nextIndex]);
   }
 
-  Future<void> _playLikedSong(Map<String, String> songDetails) async {
-    currentSongTitle = songDetails['title'];
-    currentArtist = songDetails['artist'];
-    currentAlbumArtUrl = songDetails['albumArtPath'];
+  /// Play a song from liked songs
+  Future<void> playLikedSong(Map<String, String> songDetails) async {
+    try {
+      currentSongTitle = songDetails['title'];
+      currentArtist = songDetails['artist'];
+      currentAlbumArtUrl = songDetails['albumArtPath'];
+      currentAudioUrl = songDetails['audioPath'];
+      currentPlayingSongKey =
+          "${songDetails['artist']}-${songDetails['title']}";
 
-    await playSong(
-      songDetails['audioPath']!,
-      songDetails['albumArtPath']!,
-    );
+      await playSong(
+        songDetails['audioPath']!,
+        songDetails['albumArtPath']!,
+        title: songDetails['title'],
+        artist: songDetails['artist'],
+      );
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error playing liked song: $e');
+      // Handle error appropriately
+    }
   }
 
   /// Clears the queue of related songs
   void clearRelatedSongs() {
-    _currentRelatedSongIndex = 0;
     notifyListeners();
   }
 
@@ -315,12 +531,45 @@ class AudioProvider with ChangeNotifier {
   Future<void> playSong(String audioUrl, String albumArtPath,
       {String? title, String? artist}) async {
     try {
+      String newTitle = title ?? currentSongTitle ?? "Unknown Title";
+      String newArtist = artist ?? currentArtist ?? "Unknown Artist";
+
+      if (_audioPlayer.audioSource != null) {
+        final currentSource = _audioPlayer.audioSource;
+
+        // Check if the current source is a UriAudioSource
+        if (currentSource is UriAudioSource) {
+          final currentUri =
+              currentSource.uri.toString(); // Get URI as a string
+          if (audioUrl == currentUri) {
+            debugPrint("Same audio source detected. Updating metadata only.");
+
+            // Update vibrant color and art URI
+            if (albumArtPath.isNotEmpty) {
+              _loadVibrantColor(albumArtPath);
+            }
+
+            Uri? artUri = _createArtUri(albumArtPath);
+
+            // Update the current media item
+            _currentMediaItem = MediaItem(
+              id: _currentMediaItem?.id ??
+                  DateTime.now().millisecondsSinceEpoch.toString(),
+              album: artist ?? "Unknown Artist",
+              title: title ?? "Unknown Title",
+              artUri: artUri,
+            );
+
+            notifyListeners();
+            return; // Exit early without resetting playback
+          }
+        }
+      }
+      // New song; initialize playback
+      debugPrint("New audio source detected. Initializing playback.");
       isChangingSong = true;
       position = Duration.zero;
       sliderPosition = Duration.zero;
-
-      String newTitle = title ?? currentSongTitle ?? "Unknown Title";
-      String newArtist = artist ?? currentArtist ?? "Unknown Artist";
 
       if (albumArtPath.isNotEmpty) {
         _loadVibrantColor(albumArtPath);
@@ -342,7 +591,6 @@ class AudioProvider with ChangeNotifier {
         ),
       );
 
-      position = Duration.zero;
       await _audioPlayer.play();
       isPlaying = true;
       isChangingSong = false;
@@ -354,6 +602,8 @@ class AudioProvider with ChangeNotifier {
       isChangingSong = false;
       notifyListeners();
     }
+
+    // Reset related songs if needed
     resetRelatedSongs();
   }
 

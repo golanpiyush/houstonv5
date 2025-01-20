@@ -90,14 +90,14 @@ class MusicApiService {
           .timeout(const Duration(seconds: 10));
 
       print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      // print('Response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
 
         // Check if the server response contains song_details
         if (data.containsKey('song_details') && data['song_details'] != null) {
-          print('Parsing song_details: ${data['song_details']}');
+          // print('Parsing song_details: ${data['song_details']}');
 
           // Parse the main song details
           final songDetails = SongDetails.fromJson(data['song_details']);

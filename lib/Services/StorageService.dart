@@ -217,6 +217,11 @@ class StorageService extends ChangeNotifier {
           _currentDownloadTitle == title &&
           _currentDownloadArtist == artist) {
         await cancelCurrentDownload();
+
+        // Reset download state
+        _isDownloading = false;
+        _currentDownloadTitle = null;
+        _currentDownloadArtist = null;
       }
 
       final prefs = await SharedPreferences.getInstance();

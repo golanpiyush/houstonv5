@@ -31,7 +31,7 @@ class RelatedSongData {
     } catch (e) {
       debugPrint('Error parsing JSON to RelatedSongData: $e');
       debugPrint('Received JSON: $json'); // Add this for debugging
-      throw FormatException('Invalid JSON format for RelatedSongData');
+      throw const FormatException('Invalid JSON format for RelatedSongData');
     }
   }
 
@@ -54,7 +54,10 @@ class RelatedSongData {
 class RelatedSongsQueue {
   static final RelatedSongsQueue _instance = RelatedSongsQueue._internal();
 
-  final List<RelatedSongData> _songs = [];
+  final List<RelatedSongData> _songs = []; // The main queue
+  final List<RelatedSongData> _history = []; // To store previously played songs
+  RelatedSongData? currentSong; // Track the current song
+  RelatedSongData? previousSong; // Track the previous song
 
   factory RelatedSongsQueue() {
     return _instance;
@@ -78,21 +81,63 @@ class RelatedSongsQueue {
       debugPrint('Queue is empty. Cannot get next song.');
       return null;
     }
+
     final song = _songs.removeAt(0);
+    _history.add(song); // Add to history when played
+
+    // Update previousSong before updating currentSong
+    debugPrint('Setting previousSong before playing next song...');
+    previousSong = currentSong;
+
+    // Now, update currentSong after setting previousSong
+    currentSong = song;
+
+    // Log the update process
+    debugPrint('Now playing song: ${currentSong?.title}');
+    debugPrint('Previous song: ${previousSong?.title}');
+
     debugPrint(
         'Returning next song: ${song.title}. Remaining queue size: ${_songs.length}');
+    return song;
+  }
+
+  RelatedSongData? getPreviousSong() {
+    if (_history.isEmpty) {
+      debugPrint('No previous song in history.');
+      return null;
+    }
+
+    final song = _history.last;
+
+    // Ensure we only change previousSong if currentSong is not null
+    if (currentSong != null) {
+      debugPrint('Setting previousSong before playing previous song...');
+      previousSong = currentSong;
+      currentSong = song;
+    }
+
+    // Log the update process
+    debugPrint('Now playing previous song: ${currentSong?.title}');
+    debugPrint('Previous song: ${previousSong?.title}');
+
+    debugPrint('Returning previous song: ${song.title}.');
     return song;
   }
 
   void clear() {
     debugPrint('Clearing queue. Previous size: ${_songs.length}');
     _songs.clear();
+    _history.clear(); // Optionally clear history as well
+    currentSong = null; // Reset current song
+    previousSong = null; // Reset previous song
   }
 
-  /// Resets the queue by clearing all songs and reinitializing if needed
   void reset() {
     debugPrint('Resetting queue. Current size: ${_songs.length}');
     _songs.clear();
+    _history.clear(); // Optionally clear history as well
+    currentSong = null; // Reset current song
+    previousSong = null; // Reset previous song
     debugPrint('Queue reset complete. New size: ${_songs.length}');
   }
 

@@ -9,6 +9,9 @@ import 'Services/AudioProvider.dart';
 import 'Screens/splashScreen.dart';
 import 'Screens/loginScreen.dart';
 import 'Screens/searchScreen.dart';
+import 'package:flutter/foundation.dart'; // For kDebugMode
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,7 +23,7 @@ Future<void> main() async {
     androidNotificationOngoing: true,
   );
 
-  // Initialize Awesome Notifications first
+  // Initialize Awesome Notifications
   await AwesomeNotifications().initialize(
     'resource://drawable/ic_launcher',
     [
@@ -48,35 +51,18 @@ Future<void> main() async {
   final settings = Settings();
   await settings.loadThemePreference();
 
-  // Initialize Awesome Notifications
-  AwesomeNotifications().initialize(
-    'resource://drawable/res_app_icon',
-    [
-      NotificationChannel(
-        channelKey: 'basic_channel',
-        channelName: 'Basic notifications',
-        channelDescription: 'Notification channel for basic notifications',
-        defaultColor: const Color(0xFF9D50DD),
-        ledColor: Colors.white,
-      ),
-    ],
-  );
-
   // Run the app with providers
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(
           create: (_) => StorageService(),
-          lazy: false,
         ),
         ChangeNotifierProvider(
           create: (_) => AudioProvider(),
-          lazy: false,
         ),
         ChangeNotifierProvider(
           create: (_) => settings,
-          lazy: false,
         ),
       ],
       child: const MyApp(),
@@ -100,7 +86,9 @@ class MyApp extends StatelessWidget {
         return const LoginScreen();
       }
     } catch (e) {
-      debugPrint('Error determining initial screen: $e');
+      if (kDebugMode) {
+        debugPrint('Error determining initial screen: $e');
+      }
       return const LoginScreen();
     }
   }
@@ -110,6 +98,7 @@ class MyApp extends StatelessWidget {
     return Consumer<Settings>(
       builder: (context, settings, _) {
         return MaterialApp(
+          navigatorKey: navigatorKey,
           title: 'Houston',
           theme: ThemeData(
             primarySwatch: Colors.blue,
@@ -122,8 +111,10 @@ class MyApp extends StatelessWidget {
           builder: (context, child) {
             return Consumer<StorageService>(
               builder: (context, storageService, _) {
-                debugPrint(
-                    'Main.dart - StorageService isDownloading: ${storageService.isDownloading}'); // Debug print
+                if (kDebugMode) {
+                  debugPrint(
+                      'Main.dart - StorageService isDownloading: ${storageService.isDownloading}');
+                }
                 return child!;
               },
             );

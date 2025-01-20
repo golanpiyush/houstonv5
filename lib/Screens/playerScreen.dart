@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:houstonv8/Services/Managers/downloadManager.dart';
 import 'package:houstonv8/Services/Managers/playlistManager.dart';
+
 import 'package:houstonv8/Services/SongDetails.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -32,6 +33,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool isLoadingLyrics = false;
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
+  // late RelatedSongData;
   bool _isControllerInitialized = false;
   bool _mounted = true;
   double downloadProgress = 0.0;
@@ -42,17 +44,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   Color _iconColor =
       Colors.white30; // Changed to _iconColor to follow naming convention
   late AnimationController _fadeInController;
-
-  final StorageService _storageService = StorageService();
+  late final AudioProvider _audioProvider;
+  late final StorageService _storageService;
   final PlaylistManager _playlistManager = PlaylistManager();
   final downloadManager = DownloadManager();
 
   @override
   void initState() {
     super.initState();
+    _storageService = StorageService();
     _initializeAnimation(); // Ensure that both _controller and _fadeInController are initialized
-    _checkIfSongIsLiked();
+    // _checkIfSongIsLiked();
+    _initializePlayerState();
     _initializeScreen();
+    _audioProvider = Provider.of<AudioProvider>(context, listen: false);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final audioProvider = Provider.of<AudioProvider>(context, listen: false);
@@ -100,7 +105,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       // Change to the next or previous song
       if (isNext) {
         await audioProvider.nextSong();
+        _checkIfSongIsLiked();
       } else {
+        _checkIfSongIsLiked();
         await audioProvider.previousSong();
       }
 
@@ -141,6 +148,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  Future<void> _initializePlayerState() async {
+    if (!_mounted) return;
+
+    final currentSong = await _audioProvider.getCurrentSongDetails();
+    if (currentSong != null) {
+      setState(() {
+        isFavorite = currentSong.isLiked;
+      });
+    }
+  }
+
   Future<void> _handleFavoriteToggle() async {
     if (!_mounted) return;
 
@@ -151,41 +169,39 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     try {
       if (isFavorite) {
-        // Show "Adding to favorites" snackbar immediately
         _showSnackBar('Adding to favorites...');
-
-        // Add song to favorites
-        await _storageService.likeSong(
-          title: widget.songDetails.title,
-          artist: widget.songDetails.artists,
-          albumArtUrl: widget.songDetails.albumArt,
-          audioUrl: widget.songDetails.audioUrl,
-        );
-
+        await _audioProvider.toggleLikeCurrentSong();
         if (_mounted) {
           _showSnackBar('Added to favorites!');
         }
       } else {
-        // Unlike song and cancel any ongoing download
-        await _storageService.unlikeSong(
-          widget.songDetails.title,
-          widget.songDetails.artists,
+        _showSnackBar('Removing from favorites...');
+        await _audioProvider.unlikeSong(
+          title: widget.songDetails.title,
+          artist: widget.songDetails.artists,
         );
-
         if (_mounted) {
           _showSnackBar('Removed from favorites!');
+        }
+      }
+
+      // Refresh current song details to ensure UI is in sync
+      if (_mounted) {
+        final updatedSong = await _audioProvider.getCurrentSongDetails();
+        if (updatedSong != null) {
+          setState(() {
+            isFavorite = updatedSong.isLiked;
+          });
         }
       }
     } catch (e) {
       debugPrint('Error handling favorite toggle: $e');
 
-      // Revert state on error
       if (_mounted) {
         setState(() {
           isFavorite = previousState;
         });
 
-        // Show more specific error message if possible
         String errorMessage = 'Error updating favorites';
         if (e.toString().contains('download')) {
           errorMessage = 'Error downloading song';

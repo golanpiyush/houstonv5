@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:auto_size_text/auto_size_text.dart';
+import 'package:houstonv8/Screens/miniplayer.dart';
 import 'dart:math';
 import 'package:lottie/lottie.dart';
 
@@ -31,7 +32,7 @@ class _SongSearchScreenState extends State<SongSearchScreen>
     with TickerProviderStateMixin {
   late final TabController _tabController;
   late AnimationController _controller;
-  bool isMiniplayerActive = true;
+
   String? selectedGender;
 
   File? _profileImage;
@@ -41,9 +42,10 @@ class _SongSearchScreenState extends State<SongSearchScreen>
   );
   final TextEditingController _searchController = TextEditingController();
   final PlaylistManager _playlistManager = PlaylistManager();
-  final StorageService _storageService = StorageService();
+
   List<Map<String, String>> _likedSongs = [];
   bool _isLoading = true;
+  late final StorageService _storageService;
 
   final ValueNotifier<bool> _isLoadingNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<File?> _profileImageNotifier = ValueNotifier<File?>(null);
@@ -64,6 +66,7 @@ class _SongSearchScreenState extends State<SongSearchScreen>
     )..addListener(() {
         setState(() {});
       });
+    _storageService = StorageService();
     _toggleGreeting();
     _getGender();
     _initializeData();
@@ -146,47 +149,6 @@ class _SongSearchScreenState extends State<SongSearchScreen>
     });
   }
 
-  Future<void> _searchSong() async {
-    if (_isRequestInProgress) return;
-
-    FocusScope.of(context).unfocus();
-    final songName = _searchController.text.trim();
-
-    if (songName.isEmpty) return;
-
-    _isRequestInProgress = true;
-    _isLoadingNotifier.value = true;
-
-    final audioProvider = Provider.of<AudioProvider>(context, listen: false);
-    audioProvider.clearRelatedSongs();
-
-    try {
-      final songDetails =
-          await _musicApiService.fetchSongDetails(songName, _username);
-
-      if (songDetails != null &&
-          songDetails.title.isNotEmpty &&
-          songDetails.audioUrl.isNotEmpty) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PlayerScreen(
-              songDetails: songDetails,
-              isMiniplayer: false,
-            ),
-          ),
-        );
-      } else {
-        _showErrorSnackBar('No results found or song details are incomplete.');
-      }
-    } catch (e) {
-      _showErrorSnackBar('Error fetching song details: $e');
-    } finally {
-      _isLoadingNotifier.value = false;
-      _isRequestInProgress = false;
-    }
-  }
-
   Future<void> _loadLikedSongs() async {
     try {
       final songs = await _storageService.getLikedSongs();
@@ -260,9 +222,6 @@ class _SongSearchScreenState extends State<SongSearchScreen>
   Widget build(BuildContext context) {
     return Consumer<AudioProvider>(
       builder: (context, audioProvider, child) {
-        // SongDetails? songDetails = audioProvider.currentSong;
-        // bool isMiniplayerActive = songDetails != null;
-
         // Determine text and background colors based on theme
         bool isBlackTheme = Settings().isBlackTheme;
         Color textColor = isBlackTheme ? Colors.white : Colors.black;
@@ -271,7 +230,6 @@ class _SongSearchScreenState extends State<SongSearchScreen>
         return Scaffold(
           backgroundColor: backgroundColor, // Set the background color
           body: SafeArea(
-            // Wrap the entire content in SafeArea
             child: Stack(
               children: [
                 Column(
@@ -281,42 +239,35 @@ class _SongSearchScreenState extends State<SongSearchScreen>
                     _buildSearchField(textColor),
                     _buildTabBar(textColor),
                     Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildRecentlyPlayedTab(textColor),
-                          _buildPopularTab(),
-                          _buildLikedSongsTab(textColor),
-                          const PlaylistTab(), // Ensure this returns a Widget
-                        ],
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                            bottom: audioProvider.currentSongTitle != null &&
+                                    audioProvider.currentSongTitle!.isNotEmpty
+                                ? 80.0
+                                : 0.0), // Add padding at the bottom if song is playing
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            _buildRecentlyPlayedTab(textColor),
+                            _buildPopularTab(),
+                            _buildLikedSongsTab(
+                                textColor), // This will now have padding from bottom
+                            const PlaylistTab(),
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
-                // Uncomment this block for the miniplayer
-                // if (isMiniplayerActive)
-                //   Positioned(
-                //     bottom: 0,
-                //     left: 0,
-                //     right: 0,
-                //     child: GestureDetector(
-                //       onTap: () {
-                //         Navigator.push(
-                //           context,
-                //           MaterialPageRoute(
-                //             builder: (context) => PlayerScreen(
-                //               songDetails: songDetails!,
-                //               isMiniplayer: false,
-                //             ),
-                //           ),
-                //         );
-                //       },
-                //       child: PlayerScreen(
-                //         songDetails: songDetails!,
-                //         isMiniplayer: true,
-                //       ),
-                //     ),
-                //   ),
+                // Show the MiniPlayer at the bottom if a song is playing
+                const SizedBox(height: 6),
+                // Show the MiniPlayer at the bottom if a song is playing
+                if (audioProvider.currentSongTitle != null &&
+                    audioProvider.currentSongTitle!.isNotEmpty)
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: MiniPlayer(),
+                  ),
               ],
             ),
           ),
@@ -324,8 +275,6 @@ class _SongSearchScreenState extends State<SongSearchScreen>
       },
     );
   }
-
-// Helper Methods
 
   String _getGreeting() {
     final hour = DateTime.now().hour;
@@ -535,39 +484,96 @@ class _SongSearchScreenState extends State<SongSearchScreen>
     );
   }
 
+  Future<void> _searchSong() async {
+    if (_isRequestInProgress) return;
+
+    FocusScope.of(context).unfocus();
+    final songName = _searchController.text.trim();
+
+    if (songName.isEmpty) return;
+
+    _isRequestInProgress = true;
+    _isLoadingNotifier.value = true;
+
+    final audioProvider = Provider.of<AudioProvider>(context, listen: false);
+    audioProvider.clearRelatedSongs();
+
+    try {
+      final songDetails =
+          await _musicApiService.fetchSongDetails(songName, _username);
+
+      if (songDetails != null &&
+          songDetails.title.isNotEmpty &&
+          songDetails.audioUrl.isNotEmpty) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PlayerScreen(
+              songDetails: songDetails,
+              isMiniplayer: false,
+            ),
+          ),
+        );
+      } else {
+        _showErrorSnackBar('No results found or song details are incomplete.');
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error fetching song details: $e');
+    } finally {
+      _isLoadingNotifier.value = false;
+      _isRequestInProgress = false;
+    }
+  }
+
   Widget _buildSearchField(Color textColor) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          hintText: 'Search',
-          hintStyle: TextStyle(color: Colors.grey.shade400),
-          prefixIcon: IconButton(
-            icon: Icon(Icons.search, color: textColor),
-            onPressed: _searchSong,
+      child: Stack(
+        children: [
+          TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search',
+              hintStyle: TextStyle(color: Colors.grey.shade400),
+              prefixIcon: IconButton(
+                icon: Icon(Icons.search, color: textColor),
+                onPressed: _searchSong,
+              ),
+              filled: true,
+              fillColor: Settings().isBlackTheme
+                  ? Colors.grey.shade800
+                  : Colors.grey.shade100,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(20),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            style: TextStyle(color: textColor),
+            onSubmitted: (_) => _searchSong(),
           ),
-          filled: true,
-          fillColor: Settings().isBlackTheme
-              ? Colors.grey.shade800
-              : Colors.grey.shade100,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(20),
-            borderSide: BorderSide.none,
+          ValueListenableBuilder<bool>(
+            valueListenable: _isLoadingNotifier,
+            builder: (context, isLoading, child) {
+              return isLoading
+                  ? const Positioned(
+                      right: 16.0,
+                      top: 10.0,
+                      child: CircularProgressIndicator(),
+                    )
+                  : const SizedBox.shrink();
+            },
           ),
-        ),
-        style: TextStyle(color: textColor),
-        onSubmitted: (_) => _searchSong(),
+        ],
       ),
     );
   }
 
   Widget _buildTabBar(Color textColor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 0.0),
+      padding: const EdgeInsets.symmetric(horizontal: 0.3),
       child: TabBar(
         controller: _tabController,
-        indicatorColor: const Color.fromARGB(255, 45, 251, 107),
+        indicatorColor: const Color.fromARGB(255, 45, 59, 251),
         labelColor: Colors.greenAccent,
         unselectedLabelColor: textColor.withOpacity(0.6),
         isScrollable: true,
@@ -588,7 +594,7 @@ class _SongSearchScreenState extends State<SongSearchScreen>
           Tab(
             child: Center(
               child: Text(
-                'Popular',
+                'Friends',
                 style: TextStyle(
                   fontFamily: 'Jost',
                   fontWeight: FontWeight.w500,
@@ -651,25 +657,34 @@ class _SongSearchScreenState extends State<SongSearchScreen>
         SongDetails song = songHistory[index];
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
-          leading: ClipRRect(
-            borderRadius:
-                BorderRadius.circular(8.0), // Adjust the radius as needed
-            // ignore: unnecessary_null_comparison
-            child: song.albumArt != null
-                ? Image.network(
-                    song.albumArt,
-                    width: 57, // Set desired width
-                    height: 57, // Set desired height
-                    fit: BoxFit
-                        .cover, // Ensures the image fits within the square
-                  )
-                : Container(
-                    width: 60,
-                    height: 60,
-                    color: Colors.grey.shade200,
-                    child: const Icon(Icons.music_note,
-                        size: 30, color: Colors.grey),
-                  ),
+          leading: SizedBox(
+            width: 57, // Ensure the leading widget does not take up more space
+            height: 57,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8.0),
+              child: song.albumArt.isNotEmpty
+                  ? Image.network(
+                      song.albumArt,
+                      width: 57,
+                      height: 57,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        // Return the default image if there is an error
+                        return Image.asset(
+                          'assets/images/default_album_art.jpg',
+                          width: 57,
+                          height: 57,
+                          fit: BoxFit.cover,
+                        );
+                      },
+                    )
+                  : Image.asset(
+                      'assets/images/default_album_art.jpg',
+                      width: 57,
+                      height: 57,
+                      fit: BoxFit.cover,
+                    ),
+            ),
           ),
           title: AutoSizeText(
             song.title,
@@ -697,11 +712,11 @@ class _SongSearchScreenState extends State<SongSearchScreen>
             style: TextStyle(
               fontFamily: 'Jost',
               fontWeight: FontWeight.w100,
-              fontSize: 12, // Adjust font size as needed
+              fontSize: 12,
               color: textColor,
             ),
             maxLines: 1,
-            overflow: TextOverflow.ellipsis, // Truncates text if it overflows
+            overflow: TextOverflow.ellipsis,
           ),
           onTap: () {
             Navigator.push(
@@ -788,59 +803,79 @@ class _SongSearchScreenState extends State<SongSearchScreen>
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
-      itemBuilder: (context, index) {
-        final song = _likedSongs[index];
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
-          leading: _buildLikedSongAvatar(song),
-          title: Text(
-            song['title'] ?? 'Unknown Title',
-            style: TextStyle(
-              fontSize: 16,
-              fontFamily: 'Jost',
-              fontWeight: FontWeight.w500,
-              color: textColor, // Adapt text color
+    return RefreshIndicator(
+      onRefresh: _refreshLikedSongs, // Trigger refresh when user pulls down
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+        itemBuilder: (context, index) {
+          final song = _likedSongs[index];
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
+            leading: _buildLikedSongAvatar(song),
+            title: Text(
+              song['title'] ?? 'Unknown Title',
+              style: TextStyle(
+                fontSize: 16,
+                fontFamily: 'Jost',
+                fontWeight: FontWeight.w500,
+                color: textColor, // Adapt text color
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text(
-            song['artist'] ?? 'Unknown Artist',
-            style: TextStyle(
-              fontFamily: 'Jost',
-              fontSize: 14,
-              color: textColor,
+            subtitle: Text(
+              song['artist'] ?? 'Unknown Artist',
+              style: TextStyle(
+                fontFamily: 'Jost',
+                fontSize: 14,
+                color: textColor,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: IconButton(
-            icon: const Icon(Icons.favorite, color: Colors.red),
-            onPressed: () {
-              _unlikeSong(song['title']!, song['artist']!);
+            trailing: IconButton(
+              icon: const Icon(Icons.favorite, color: Colors.red),
+              onPressed: () {
+                _unlikeSong(song['title']!, song['artist']!);
+              },
+            ),
+            onTap: () {
+              final songDetails = SongDetails(
+                title: song['title'] ?? '',
+                artists: song['artist'] ?? '',
+                albumArt: song['albumArtPath'] ?? '',
+                audioUrl: song['audioPath'] ?? '',
+              );
+              _navigateToPlayerScreen(songDetails);
             },
-          ),
-          onTap: () {
-            final songDetails = SongDetails(
-              title: song['title'] ?? '',
-              artists: song['artist'] ?? '',
-              albumArt: song['albumArtPath'] ?? '',
-              audioUrl: song['audioPath'] ?? '',
-            );
-            _navigateToPlayerScreen(songDetails);
-          },
-        );
-      },
-      separatorBuilder: (context, index) => const Divider(
-        color: Colors.grey,
-        height: 1,
-        indent: 16,
-        endIndent: 16,
+          );
+        },
+        separatorBuilder: (context, index) => const Divider(
+          color: Colors.grey,
+          height: 1,
+          indent: 16,
+          endIndent: 16,
+        ),
+        itemCount: _likedSongs.length,
       ),
-      itemCount: _likedSongs.length,
     );
+  }
+
+// Add a method to handle the refresh
+  Future<void> _refreshLikedSongs() async {
+    setState(() {
+      _isLoading = true; // Show loading indicator during refresh
+    });
+
+    // Simulate data fetching (for example, from a network or database)
+    await Future.delayed(const Duration(seconds: 1));
+
+    // Refresh the liked songs list (you can replace this with your actual data fetching logic)
+    setState(() {
+      _loadLikedSongs(); // Fetch updated liked songs
+
+      _isLoading = false; // Hide loading indicator after refresh
+    });
   }
 }
 
