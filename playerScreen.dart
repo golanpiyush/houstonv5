@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:houstonv8/Services/Managers/downloadManager.dart';
 import 'package:houstonv8/Services/Managers/playlistManager.dart';
+
 import 'package:houstonv8/Services/SongDetails.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../Services/StorageService.dart';
+import 'package:skeletonizer/skeletonizer.dart';
 import 'dart:io';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../Services/AudioProvider.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class PlayerScreen extends StatefulWidget {
   final SongDetails songDetails;
+  final bool isMiniplayer;
 
-  const PlayerScreen({super.key, required this.songDetails});
+  const PlayerScreen(
+      {super.key, required this.songDetails, required this.isMiniplayer});
 
   @override
   _PlayerScreenState createState() => _PlayerScreenState();
@@ -22,8 +27,12 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen>
     with TickerProviderStateMixin {
   bool isFavorite = false;
+  bool showLyrics = false; // Define showLyrics here
+  String? lyrics;
+  bool isLoadingLyrics = false;
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
+  // late RelatedSongData;
   bool _isControllerInitialized = false;
   bool _mounted = true;
   double downloadProgress = 0.0;
@@ -34,22 +43,58 @@ class _PlayerScreenState extends State<PlayerScreen>
   Color _iconColor =
       Colors.white30; // Changed to _iconColor to follow naming convention
   late AnimationController _fadeInController;
+  late final AudioProvider _audioProvider;
 
-  final StorageService _storageService = StorageService();
   final PlaylistManager _playlistManager = PlaylistManager();
   final downloadManager = DownloadManager();
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimation(); // Ensure that both _controller and _fadeInController are initialized
-    _checkIfSongIsLiked();
-    _initializeScreen();
+    _initializeAnimation();
+    _audioProvider = Provider.of<AudioProvider>(context, listen: false);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final audioProvider = Provider.of<AudioProvider>(context, listen: false);
       audioProvider.setAlbumArt(widget.songDetails.albumArt);
+
+      // Check initial like status using the public method
+      final isLiked = await audioProvider.checkSongLikeStatus(
+        widget.songDetails.title,
+        widget.songDetails.artists,
+      );
+
+      if (mounted) {
+        setState(() {
+          isFavorite = isLiked;
+        });
+      }
     });
+
+    // Listen to changes in current song
+    _audioProvider.addListener(_updateLikeStatus);
+
+    _initializePlayerState();
+    _initializeScreen();
+  }
+
+// Add a method to update like status when current song changes
+  void _updateLikeStatus() async {
+    if (!mounted) return;
+
+    final currentSong = _audioProvider.currentSong;
+    if (currentSong != null) {
+      final isLiked = await _audioProvider.checkSongLikeStatus(
+        currentSong.title,
+        currentSong.artist,
+      );
+
+      if (mounted) {
+        setState(() {
+          isFavorite = isLiked;
+        });
+      }
+    }
   }
 
   void _initializeScreen() {
@@ -95,6 +140,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       } else {
         await audioProvider.previousSong();
       }
+      // After song change, check if the new song is liked
+      // _checkIfSongIsLiked(audioProvider);
 
       // Reset dimming animation
       _controller.reset();
@@ -107,68 +154,75 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _initializeAudioProvider() {
     final audioProvider = Provider.of<AudioProvider>(context, listen: false);
     audioProvider.setCurrentSongDetails(widget.songDetails);
+    // _checkIfSongIsLiked(audioProvider);
 
     if (widget.songDetails.audioUrl.isNotEmpty &&
         widget.songDetails.albumArt.isNotEmpty) {
+      // _checkIfSongIsLiked(audioProvider);
       audioProvider.playSong(
           widget.songDetails.audioUrl, widget.songDetails.albumArt);
     }
   }
 
-  Future<void> _checkIfSongIsLiked() async {
+  // void _checkIfSongIsLiked(AudioProvider audioProvider) async {
+  //   final currentSongTitle = audioProvider.currentSong?.title;
+  //   final currentArtist = audioProvider.currentSong?.artist;
+
+  //   if (currentSongTitle != null && currentArtist != null) {
+  //     final isLiked =
+  //         await _storageService.isSongLiked(currentSongTitle, currentArtist);
+  //     setState(() {
+  //       isFavorite =
+  //           isLiked; // Assuming _isSongLiked is a boolean field in your class
+  //     });
+  //   } else {
+  //     debugPrint('Song title or artist is null, cannot check liked status.');
+  //     setState(() {
+  //       isFavorite = false; // Default to not liked if details are missing
+  //     });
+  //   }
+  // }
+
+  Future<void> _initializePlayerState() async {
     if (!_mounted) return;
 
-    try {
-      final isLiked = await _storageService.isSongLiked(
-        widget.songDetails.title,
-        widget.songDetails.artists,
-      );
-      if (!_mounted) return;
-
+    final currentSong = await _audioProvider.getCurrentSongDetails();
+    if (currentSong != null) {
       setState(() {
-        isFavorite = isLiked;
+        isFavorite = currentSong.isLiked;
       });
-    } catch (e) {
-      debugPrint('Error checking if song is liked: $e');
     }
   }
 
   Future<void> _handleFavoriteToggle() async {
     if (!_mounted) return;
 
-    final previousState = isFavorite;
-    setState(() {
-      isFavorite = !isFavorite;
-    });
+    final currentSong = _audioProvider.currentSong;
+    if (currentSong == null) {
+      debugPrint('No current song available');
+      return;
+    }
+
+    final isCurrentlyLiked = currentSong.isLiked;
+    debugPrint('Current song liked status: $isCurrentlyLiked');
+
+    // Show a snackbar indicating the action
+    _showSnackBar(isCurrentlyLiked
+        ? 'Removing from favorites...'
+        : 'Adding to favorites...');
 
     try {
-      print('liked s');
-      if (isFavorite) {
-        // Add song to favorites
-        await _storageService.likeSong(
-          title: widget.songDetails.title,
-          artist: widget.songDetails.artists,
-          albumArtUrl: widget.songDetails.albumArt,
-          audioUrl: widget.songDetails.audioUrl,
-        );
-        _showSnackBar('Added to favorites!');
-      } else {
-        // If it's removed from favorites, cancel the download
-        downloadManager.cancelDownload(); // This is fine, it returns void
-        await _storageService.unlikeSong(
-          widget.songDetails.title,
-          widget.songDetails.artists,
-        );
-        _showSnackBar('Removed from favorites!');
+      debugPrint('Calling toggleLikeCurrentSong');
+      final message = await _audioProvider.toggleLikeCurrentSong();
+      debugPrint('Toggle result: $message');
+
+      // Update snackbar with the final result
+      if (_mounted) {
+        _showSnackBar(message);
       }
     } catch (e) {
-      debugPrint('Error handling favorite toggle: $e');
-
-      // Revert state on error
+      debugPrint('Error in _handleFavoriteToggle: $e');
       if (_mounted) {
-        setState(() {
-          isFavorite = previousState; // Restore the previous favorite state
-        });
         _showSnackBar('Error updating favorites: Please try again');
       }
     }
@@ -182,8 +236,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final currentSong = _audioProvider.currentSong;
+
+    // Sync isFavorite with the current song's like status
+    setState(() {
+      isFavorite = currentSong?.isLiked ?? false;
+    });
+  }
+
+  @override
   void dispose() {
     _mounted = false;
+    _audioProvider.removeListener(_updateLikeStatus);
     _colorLoadingTimer?.cancel();
     if (_isControllerInitialized) {
       _controller.dispose();
@@ -213,9 +279,73 @@ class _PlayerScreenState extends State<PlayerScreen>
       return Scaffold(
         backgroundColor: Colors.black,
         appBar: _buildAppBar(audioProvider),
-        body: _buildBody(audioProvider, isPlaying),
+        body: Stack(
+          children: [
+            // Your main player content goes here
+            _buildBody(audioProvider, isPlaying),
+
+            // Miniplayer at the bottom, only visible if `isMiniplayer` is true
+            if (widget.isMiniplayer) _buildMiniplayer(context),
+          ],
+        ),
       );
     });
+  }
+
+  Widget _buildMiniplayer(BuildContext context) {
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: GestureDetector(
+        onTap: () {
+          // When the miniplayer is tapped, go to full screen
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PlayerScreen(
+                songDetails: widget.songDetails,
+                isMiniplayer: false, // Full screen player
+              ),
+            ),
+          );
+        },
+        child: Container(
+          height: 70,
+          color: Colors.black.withOpacity(0.8),
+          child: Row(
+            children: [
+              const Icon(Icons.music_note, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.songDetails.title,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                    Text(
+                      widget.songDetails.artists,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              // Removed progress display
+              const Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Icon(
+                  Icons.play_arrow, // Icon to indicate play action
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   PreferredSizeWidget _buildAppBar(AudioProvider audioProvider) {
@@ -229,28 +359,30 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _buildBody(AudioProvider audioProvider, bool isPlaying) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildAlbumArt(audioProvider, isPlaying),
-          const SizedBox(height: 30),
-          _buildSongInfo(audioProvider),
-          const SizedBox(height: 30),
-          _buildProgressBar(audioProvider),
-          _buildTimeLabels(audioProvider),
-          const SizedBox(height: 2),
-          _buildControls(audioProvider, isPlaying),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.center, // Ensures alignment is centered
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 40), // Adjust padding as needed
+          child:
+              _buildAlbumArt(audioProvider, isPlaying), // Album art at the top
+        ),
+        const SizedBox(height: 30), // Space between album art and song info
+        _buildSongInfo(audioProvider),
+        const SizedBox(height: 30),
+        _buildProgressBar(audioProvider),
+        _buildTimeLabels(audioProvider),
+        const SizedBox(height: 2),
+        _buildControls(audioProvider, isPlaying),
+      ],
     );
   }
 
   Widget _buildAlbumArtContainer(AudioProvider audioProvider) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 1000),
-      curve: Curves
-          .easeInOutQuint, // Set the animation curve for smooth transition
+      curve: Curves.easeInOutQuint,
       width: 340,
       height: 340,
       decoration: BoxDecoration(
@@ -264,40 +396,215 @@ class _PlayerScreenState extends State<PlayerScreen>
         ],
         image: DecorationImage(
           image: _getAlbumArtImage(audioProvider.currentAlbumArtUrl),
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
         ),
       ),
     );
   }
 
+  Widget _buildLyricsOverlay(String lyrics, VoidCallback onDismiss) {
+    // Split the lyrics into lines
+    List<String> lines = lyrics.split("\n");
+
+    return Positioned(
+        top: 0, // Position at the top of the screen
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: GestureDetector(
+            onTap: () {
+              onDismiss(); // Call the onDismiss function when tapped
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16.0), // Apply 16 radius
+              child: Container(
+                padding: const EdgeInsets.all(2.0),
+                color: Colors.black
+                    .withOpacity(0.7), // Semi-transparent black background
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: lines.map((line) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 4.0), // Add spacing between lines
+                        child: Text(
+                          line.toLowerCase(), // Convert to lowercase
+                          textAlign: TextAlign.center, // Center-align the text
+                          style: const TextStyle(
+                            fontFamily: 'Jost', // Use Jost font
+                            color: Colors.white,
+                            fontSize: 14.0, // Same font size for all lines
+                            fontWeight: FontWeight.w600,
+                            height: 1.5, // Line height (spacing)
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            )));
+  }
+
   Widget _buildAlbumArt(AudioProvider audioProvider, bool isPlaying) {
-    double? dragStartX;
+    double? dragStartX; // Horizontal drag start position
+    double? dragStartY; // Vertical drag start position
 
-    return GestureDetector(
-      onTap: () => audioProvider.togglePlayPause(), // Toggle Play/Pause on tap
-      onHorizontalDragStart: (details) {
-        dragStartX =
-            details.localPosition.dx; // Capture the starting point of the drag
-      },
-      onHorizontalDragEnd: (details) {
-        if (dragStartX != null) {
-          final dragDistance = details.localPosition.dx - dragStartX!;
-          const threshold = 20.0; // Threshold for detecting drag distance
+    // Function to fetch lyrics for the current song and artist
+    Future<void> fetchLyricsForSong(String songName, String artistName) async {
+      setState(() {
+        isLoadingLyrics = true; // Start loading
+        print(
+            "Attempting to fetch lyrics for: $songName by $artistName"); // Debugging
+      });
 
-          if (dragDistance.abs() > threshold) {
-            // If the drag distance exceeds the threshold, handle song change
-            _handleSongChange(dragDistance < 0, audioProvider);
-          }
+      try {
+        // Construct the URL for the new API with both songName and artistName
+        final url = Uri.parse(
+            "https://some-random-api.com/lyrics/?title=$songName%20$artistName");
+
+        // Fetch the response
+        final response = await http.get(url);
+
+        // Check the response status
+        if (response.statusCode == 200) {
+          // Parse the JSON
+          final data = json.decode(response.body);
+
+          // Extract lyrics
+          final fetchedLyrics =
+              data['lyrics'] ?? 'No lyrics found for this song.';
+          print("Lyrics fetched successfully: $fetchedLyrics"); // Debugging
+
+          // Update the state with the fetched lyrics
+          setState(() {
+            isLoadingLyrics = false;
+            lyrics = fetchedLyrics;
+            showLyrics = true;
+            print("showLyrics set to true");
+          });
+        } else {
+          // Handle non-200 status codes
+          print("Failed to fetch lyrics: ${response.statusCode}");
+          setState(() {
+            lyrics = "I couldn't find the lyrics of $songName by $artistName";
+            showLyrics = true;
+          });
         }
-        dragStartX = null; // Reset the drag start position
+      } catch (e) {
+        // Handle errors
+        print("Error fetching lyrics: $e");
+        setState(() {
+          lyrics = "Error fetching lyrics: $e";
+          showLyrics = true; // Show the error message as lyrics
+        });
+      } finally {
+        setState(() {
+          isLoadingLyrics = false; // Stop loading
+        });
+      }
+    }
+
+    // Function to fetch lyrics for the current song and artist dynamically
+    // Future<void> fetchLyricsForCurrentSong() async {
+    //   // Get the current song title and artist from the audio provider
+    //   String currentSong = audioProvider.currentSongTitle ?? "Unknown Title";
+    //   String currentArtist = audioProvider.currentArtist ?? "Unknown Artist";
+
+    //   // Call the fetchLyricsForSong function with the current song and artist
+    //   fetchLyricsForSong(currentSong, currentArtist);
+    // }
+
+    return StatefulBuilder(
+      builder: (context, localSetState) {
+        return GestureDetector(
+            onTap: () => audioProvider.togglePlayPause(), // Toggle play/pause
+            onHorizontalDragStart: (details) {
+              dragStartX =
+                  details.localPosition.dx; // Capture horizontal drag start
+            },
+            onHorizontalDragEnd: (details) {
+              if (dragStartX != null) {
+                final dragDistance = details.localPosition.dx - dragStartX!;
+                const threshold = 20.0; // Threshold for horizontal drag
+                if (dragDistance.abs() > threshold) {
+                  _handleSongChange(dragDistance < 0, audioProvider);
+                }
+              }
+              dragStartX = null; // Reset drag position
+            },
+            onVerticalDragStart: (details) {
+              dragStartY =
+                  details.localPosition.dy; // Capture vertical drag start
+              print("Vertical drag started at: $dragStartY"); // Debugging
+            },
+            onVerticalDragUpdate: (details) {
+              if (dragStartY != null) {
+                final dragDistance = details.localPosition.dy - dragStartY!;
+                const threshold = -50.0; // Negative threshold for swipe up
+
+                print(
+                    "Drag distance: $dragDistance, Loading: $isLoadingLyrics"); // Debugging
+
+                if (dragDistance < threshold && !isLoadingLyrics) {
+                  final currentSong = audioProvider.currentSongTitle;
+                  final currentArtist = audioProvider.currentArtist;
+                  if (currentSong != null && currentArtist != null) {
+                    fetchLyricsForSong(
+                        currentSong, currentArtist); // Fetch lyrics
+                  }
+                }
+              }
+            },
+            onVerticalDragEnd: (_) {
+              dragStartY = null; // Reset drag start position
+            },
+            child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: showLyrics
+                    ? GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            showLyrics = false;
+                            print("Lyrics overlay dismissed");
+                          });
+                        },
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            _buildAlbumArtContainer(
+                                audioProvider), // Album art in the background
+                            _buildFadeOverlay(), // Fade overlay on top of the album art
+                            _buildLyricsOverlay(lyrics ?? "No lyrics available",
+                                () {
+                              setState(() {
+                                showLyrics = false; // Dismiss lyrics overlay
+                              });
+                            }), // Lyrics overlay on top
+                          ],
+                        ),
+                      )
+                    : Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Skeletonizer(
+                            enabled:
+                                isLoadingLyrics, // Enable skeleton loader when lyrics are loading
+                            child: AnimatedOpacity(
+                              opacity: isLoadingLyrics
+                                  ? 0.01
+                                  : 1.0, // Lower opacity to 0.1 when loading
+                              duration: const Duration(
+                                  milliseconds: 300), // Smooth fade transition
+                              child: _buildAlbumArtContainer(
+                                  audioProvider), // Your album art container
+                            ),
+                          ),
+                          _buildFadeOverlay(), // Your fade overlay
+                        ],
+                      )));
       },
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          _buildAlbumArtContainer(audioProvider),
-          _buildFadeOverlay(),
-        ],
-      ),
     );
   }
 
@@ -349,7 +656,11 @@ class _PlayerScreenState extends State<PlayerScreen>
             truncateText(audioProvider.currentArtist ?? "Unknown Artist"),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 18),
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 18,
+              fontFamily: 'Jost',
+            ),
           ),
         ),
       ],
@@ -442,11 +753,13 @@ class _PlayerScreenState extends State<PlayerScreen>
           children: [
             IconButton(
               icon: Icon(
-                isFavorite ? Icons.favorite : Icons.favorite_border,
+                _audioProvider.currentSong?.isLiked == true
+                    ? Icons.favorite
+                    : Icons.favorite_border,
               ),
-              color: isFavorite
-                  ? audioProvider.vibrantColor
-                  : audioProvider.vibrantColor,
+              color: _audioProvider.currentSong?.isLiked == true
+                  ? _audioProvider.vibrantColor
+                  : Colors.white.withOpacity(0.8),
               iconSize: 30,
               onPressed: _handleFavoriteToggle,
             ),
