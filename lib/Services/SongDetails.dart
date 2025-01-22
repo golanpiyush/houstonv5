@@ -5,6 +5,7 @@ class SongDetails {
   final String artists;
   final String albumArt;
   final String audioUrl;
+  final bool isLiked;
   int? expireTime;
 
   SongDetails({
@@ -12,6 +13,7 @@ class SongDetails {
     required this.artists,
     required this.albumArt,
     required this.audioUrl,
+    this.isLiked = false,
     this.expireTime,
   });
 

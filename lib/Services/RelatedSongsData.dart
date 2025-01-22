@@ -107,21 +107,22 @@ class RelatedSongsQueue {
       return null;
     }
 
-    final song = _history.last;
+    // Get the last played song from history
+    final previous = _history.removeLast();
 
-    // Ensure we only change previousSong if currentSong is not null
+    // Update current and previous song states
     if (currentSong != null) {
       debugPrint('Setting previousSong before playing previous song...');
       previousSong = currentSong;
-      currentSong = song;
     }
+
+    currentSong = previous;
 
     // Log the update process
     debugPrint('Now playing previous song: ${currentSong?.title}');
     debugPrint('Previous song: ${previousSong?.title}');
 
-    debugPrint('Returning previous song: ${song.title}.');
-    return song;
+    return currentSong;
   }
 
   void clear() {

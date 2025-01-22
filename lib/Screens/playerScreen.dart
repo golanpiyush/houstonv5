@@ -6,7 +6,6 @@ import 'package:houstonv8/Services/SongDetails.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:skeletonizer/skeletonizer.dart';
-import '../Services/StorageService.dart';
 import 'dart:io';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../Services/AudioProvider.dart';
@@ -45,24 +44,57 @@ class _PlayerScreenState extends State<PlayerScreen>
       Colors.white30; // Changed to _iconColor to follow naming convention
   late AnimationController _fadeInController;
   late final AudioProvider _audioProvider;
-  late final StorageService _storageService;
+
   final PlaylistManager _playlistManager = PlaylistManager();
   final downloadManager = DownloadManager();
 
   @override
   void initState() {
     super.initState();
-    _storageService = StorageService();
-    _initializeAnimation(); // Ensure that both _controller and _fadeInController are initialized
-    // _checkIfSongIsLiked();
-    _initializePlayerState();
-    _initializeScreen();
+    _initializeAnimation();
     _audioProvider = Provider.of<AudioProvider>(context, listen: false);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final audioProvider = Provider.of<AudioProvider>(context, listen: false);
       audioProvider.setAlbumArt(widget.songDetails.albumArt);
+
+      // Check initial like status using the public method
+      final isLiked = await audioProvider.checkSongLikeStatus(
+        widget.songDetails.title,
+        widget.songDetails.artists,
+      );
+
+      if (mounted) {
+        setState(() {
+          isFavorite = isLiked;
+        });
+      }
     });
+
+    // Listen to changes in current song
+    _audioProvider.addListener(_updateLikeStatus);
+
+    _initializePlayerState();
+    _initializeScreen();
+  }
+
+// Add a method to update like status when current song changes
+  void _updateLikeStatus() async {
+    if (!mounted) return;
+
+    final currentSong = _audioProvider.currentSong;
+    if (currentSong != null) {
+      final isLiked = await _audioProvider.checkSongLikeStatus(
+        currentSong.title,
+        currentSong.artist,
+      );
+
+      if (mounted) {
+        setState(() {
+          isFavorite = isLiked;
+        });
+      }
+    }
   }
 
   void _initializeScreen() {
@@ -105,11 +137,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       // Change to the next or previous song
       if (isNext) {
         await audioProvider.nextSong();
-        _checkIfSongIsLiked();
       } else {
-        _checkIfSongIsLiked();
         await audioProvider.previousSong();
       }
+      // After song change, check if the new song is liked
+      // _checkIfSongIsLiked(audioProvider);
 
       // Reset dimming animation
       _controller.reset();
@@ -122,31 +154,34 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _initializeAudioProvider() {
     final audioProvider = Provider.of<AudioProvider>(context, listen: false);
     audioProvider.setCurrentSongDetails(widget.songDetails);
+    // _checkIfSongIsLiked(audioProvider);
 
     if (widget.songDetails.audioUrl.isNotEmpty &&
         widget.songDetails.albumArt.isNotEmpty) {
+      // _checkIfSongIsLiked(audioProvider);
       audioProvider.playSong(
           widget.songDetails.audioUrl, widget.songDetails.albumArt);
     }
   }
 
-  Future<void> _checkIfSongIsLiked() async {
-    if (!_mounted) return;
+  // void _checkIfSongIsLiked(AudioProvider audioProvider) async {
+  //   final currentSongTitle = audioProvider.currentSong?.title;
+  //   final currentArtist = audioProvider.currentSong?.artist;
 
-    try {
-      final isLiked = await _storageService.isSongLiked(
-        widget.songDetails.title,
-        widget.songDetails.artists,
-      );
-      if (!_mounted) return;
-
-      setState(() {
-        isFavorite = isLiked;
-      });
-    } catch (e) {
-      debugPrint('Error checking if song is liked: $e');
-    }
-  }
+  //   if (currentSongTitle != null && currentArtist != null) {
+  //     final isLiked =
+  //         await _storageService.isSongLiked(currentSongTitle, currentArtist);
+  //     setState(() {
+  //       isFavorite =
+  //           isLiked; // Assuming _isSongLiked is a boolean field in your class
+  //     });
+  //   } else {
+  //     debugPrint('Song title or artist is null, cannot check liked status.');
+  //     setState(() {
+  //       isFavorite = false; // Default to not liked if details are missing
+  //     });
+  //   }
+  // }
 
   Future<void> _initializePlayerState() async {
     if (!_mounted) return;
@@ -162,53 +197,33 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _handleFavoriteToggle() async {
     if (!_mounted) return;
 
-    final previousState = isFavorite;
-    setState(() {
-      isFavorite = !isFavorite;
-    });
+    final currentSong = _audioProvider.currentSong;
+    if (currentSong == null) {
+      debugPrint('No current song available');
+      return;
+    }
+
+    final isCurrentlyLiked = currentSong.isLiked;
+    debugPrint('Current song liked status: $isCurrentlyLiked');
+
+    // Show a snackbar indicating the action
+    _showSnackBar(isCurrentlyLiked
+        ? 'Removing from favorites...'
+        : 'Adding to favorites...');
 
     try {
-      if (isFavorite) {
-        _showSnackBar('Adding to favorites...');
-        await _audioProvider.toggleLikeCurrentSong();
-        if (_mounted) {
-          _showSnackBar('Added to favorites!');
-        }
-      } else {
-        _showSnackBar('Removing from favorites...');
-        await _audioProvider.unlikeSong(
-          title: widget.songDetails.title,
-          artist: widget.songDetails.artists,
-        );
-        if (_mounted) {
-          _showSnackBar('Removed from favorites!');
-        }
-      }
+      debugPrint('Calling toggleLikeCurrentSong');
+      final message = await _audioProvider.toggleLikeCurrentSong();
+      debugPrint('Toggle result: $message');
 
-      // Refresh current song details to ensure UI is in sync
+      // Update snackbar with the final result
       if (_mounted) {
-        final updatedSong = await _audioProvider.getCurrentSongDetails();
-        if (updatedSong != null) {
-          setState(() {
-            isFavorite = updatedSong.isLiked;
-          });
-        }
+        _showSnackBar(message);
       }
     } catch (e) {
-      debugPrint('Error handling favorite toggle: $e');
-
+      debugPrint('Error in _handleFavoriteToggle: $e');
       if (_mounted) {
-        setState(() {
-          isFavorite = previousState;
-        });
-
-        String errorMessage = 'Error updating favorites';
-        if (e.toString().contains('download')) {
-          errorMessage = 'Error downloading song';
-        } else if (e.toString().contains('storage')) {
-          errorMessage = 'Error saving song';
-        }
-        _showSnackBar('$errorMessage: Please try again');
+        _showSnackBar('Error updating favorites: Please try again');
       }
     }
   }
@@ -221,8 +236,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final currentSong = _audioProvider.currentSong;
+
+    // Sync isFavorite with the current song's like status
+    setState(() {
+      isFavorite = currentSong?.isLiked ?? false;
+    });
+  }
+
+  @override
   void dispose() {
     _mounted = false;
+    _audioProvider.removeListener(_updateLikeStatus);
     _colorLoadingTimer?.cancel();
     if (_isControllerInitialized) {
       _controller.dispose();
@@ -726,11 +753,13 @@ class _PlayerScreenState extends State<PlayerScreen>
           children: [
             IconButton(
               icon: Icon(
-                isFavorite ? Icons.favorite : Icons.favorite_border,
+                _audioProvider.currentSong?.isLiked == true
+                    ? Icons.favorite
+                    : Icons.favorite_border,
               ),
-              color: isFavorite
-                  ? audioProvider.vibrantColor
-                  : audioProvider.vibrantColor,
+              color: _audioProvider.currentSong?.isLiked == true
+                  ? _audioProvider.vibrantColor
+                  : Colors.white.withOpacity(0.8),
               iconSize: 30,
               onPressed: _handleFavoriteToggle,
             ),

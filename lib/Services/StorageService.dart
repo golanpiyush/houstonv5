@@ -36,6 +36,9 @@ class StorageService extends ChangeNotifier {
   Stream<double> get progressStream => _progressController.stream;
   double get downloadProgress => _downloadProgress;
   bool get isDownloading => _isDownloading;
+  // Public getters for the current download title and artist
+  String? get currentDownloadTitle => _currentDownloadTitle;
+  String? get currentDownloadArtist => _currentDownloadArtist;
 
   void _updateProgress(double progress) {
     if (_isDownloading) {
@@ -96,26 +99,6 @@ class StorageService extends ChangeNotifier {
           _updateNotificationAfter1Second = null;
         },
       );
-    }
-  }
-
-  // Remove the following method since it's not used
-  Future<void> _updateNotificationProgress(int progress) async {
-    try {
-      await AwesomeNotifications().createNotification(
-        content: NotificationContent(
-          id: 1, // Use a unique ID
-          channelKey: 'basic_channel',
-          title: 'Download Progress',
-          body: 'Progress: $progress%',
-          notificationLayout: NotificationLayout.ProgressBar,
-          progress: progress.toDouble(), // Convert int to double
-          icon: 'resource://drawable/ic_launcher', // Add this line
-          category: NotificationCategory.Progress,
-        ),
-      );
-    } catch (e) {
-      debugPrint('Error creating notification: $e');
     }
   }
 
@@ -324,6 +307,13 @@ class StorageService extends ChangeNotifier {
       _resetDownloadState();
       rethrow;
     }
+  }
+
+  /// Checks if the given song is currently downloading
+  bool isSongDownloading(String title, String artist) {
+    return _isDownloading &&
+        _currentDownloadTitle == title &&
+        _currentDownloadArtist == artist;
   }
 
   Future<void> refreshLikedSongs() async {

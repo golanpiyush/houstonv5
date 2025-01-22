@@ -31,7 +31,7 @@ Future<void> main() async {
         channelKey: 'basic_channel',
         channelName: 'Basic notifications',
         channelDescription: 'Notification channel for basic notifications',
-        defaultColor: const Color(0xFF9D50DD),
+        defaultColor: const Color.fromARGB(255, 80, 221, 87),
         ledColor: Colors.white,
         importance: NotificationImportance.High,
         playSound: true,

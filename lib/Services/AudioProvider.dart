@@ -213,38 +213,57 @@ class AudioProvider with ChangeNotifier {
     );
   }
 
-  /// Toggle like status for current song
-  Future<void> toggleLikeCurrentSong() async {
+  /// Checks if a song is currently downloading
+  bool isSongDownloading(String title, String artist) {
+    return _storageService.isDownloading &&
+        _storageService.currentDownloadTitle == title &&
+        _storageService.currentDownloadArtist == artist;
+  }
+
+  Future<String> toggleLikeCurrentSong() async {
+    debugPrint('toggleLikeCurrentSong called');
+
     if (currentSongTitle == null ||
         currentArtist == null ||
         currentAudioUrl == null ||
         currentAlbumArtUrl == null) {
-      return;
+      return 'Error: Song details are missing';
     }
 
-    final isLiked = await _storageService.isSongLiked(
-      currentSongTitle!,
-      currentArtist!,
-    );
-
     try {
-      if (isLiked) {
-        await _storageService.unlikeSong(
-          currentSongTitle!,
-          currentArtist!,
-        );
-      } else {
+      // Optimistically toggle the UI state
+      if (_currentSong != null) {
+        final currentStatus = _currentSong!.isLiked;
+        _currentSong = _currentSong!.copyWith(isLiked: !currentStatus);
+        notifyListeners();
+      }
+
+      // Perform the toggle action
+      if (_currentSong?.isLiked == true) {
+        debugPrint('Adding song to favorites');
         await _storageService.likeSong(
           title: currentSongTitle!,
           artist: currentArtist!,
           albumArtUrl: currentAlbumArtUrl!,
           audioUrl: currentAudioUrl!,
         );
+        return 'Added to favorites';
+      } else {
+        debugPrint('Removing song from favorites');
+        await _storageService.unlikeSong(currentSongTitle!, currentArtist!);
+        return 'Removed from favorites';
       }
-      notifyListeners();
     } catch (e) {
-      debugPrint('Error toggling like status: $e');
-      // Optionally handle the error (show a snackbar, etc.)
+      debugPrint('Error in toggleLikeCurrentSong: $e');
+
+      // Revert UI state on error
+      if (_currentSong != null) {
+        final currentStorageState = await _storageService.isSongLiked(
+            currentSongTitle!, currentArtist!);
+        _currentSong = _currentSong!.copyWith(isLiked: currentStorageState);
+        notifyListeners();
+      }
+      return 'Error updating favorites: Please try again';
     }
   }
 
@@ -534,38 +553,59 @@ class AudioProvider with ChangeNotifier {
       String newTitle = title ?? currentSongTitle ?? "Unknown Title";
       String newArtist = artist ?? currentArtist ?? "Unknown Artist";
 
-      if (_audioPlayer.audioSource != null) {
-        final currentSource = _audioPlayer.audioSource;
+      // Check like status first
+      final isLiked = await _storageService.isSongLiked(newTitle, newArtist);
 
-        // Check if the current source is a UriAudioSource
-        if (currentSource is UriAudioSource) {
-          final currentUri =
-              currentSource.uri.toString(); // Get URI as a string
-          if (audioUrl == currentUri) {
-            debugPrint("Same audio source detected. Updating metadata only.");
+      // Update current song with correct like status
+      _currentSong = CurrentSong(
+        title: newTitle,
+        artist: newArtist,
+        url: audioUrl,
+        albumArt: albumArtPath,
+        isLiked: isLiked,
+        key: "$newArtist-$newTitle",
+      );
 
-            // Update vibrant color and art URI
-            if (albumArtPath.isNotEmpty) {
-              _loadVibrantColor(albumArtPath);
-            }
+      // Check if current source exists
+      if (_audioPlayer.audioSource != null &&
+          _audioPlayer.audioSource is UriAudioSource) {
+        final currentSource = _audioPlayer.audioSource as UriAudioSource;
+        final currentUri = currentSource.uri.toString();
 
-            Uri? artUri = _createArtUri(albumArtPath);
+        // Convert file path to URI format if needed
+        String compareUrl = audioUrl;
+        if (!audioUrl.startsWith('http://') &&
+            !audioUrl.startsWith('https://')) {
+          compareUrl = Uri.file(audioUrl).toString();
+        }
 
-            // Update the current media item
-            _currentMediaItem = MediaItem(
-              id: _currentMediaItem?.id ??
-                  DateTime.now().millisecondsSinceEpoch.toString(),
-              album: artist ?? "Unknown Artist",
-              title: title ?? "Unknown Title",
-              artUri: artUri,
-            );
+        // Check if the URL/file path, title, and artist match the current song
+        if (compareUrl == currentUri &&
+            newTitle == currentSongTitle &&
+            newArtist == currentArtist) {
+          debugPrint("Same song detected. Updating metadata only.");
 
-            notifyListeners();
-            return; // Exit early without resetting playback
+          // Update album art color if it's a new album art path
+          if (albumArtPath.isNotEmpty) {
+            _loadVibrantColor(albumArtPath);
           }
+
+          Uri? artUri = _createArtUri(albumArtPath);
+          _currentMediaItem = MediaItem(
+            id: _currentMediaItem?.id ??
+                DateTime.now().millisecondsSinceEpoch.toString(),
+            album: newArtist,
+            title: newTitle,
+            artUri: artUri,
+          );
+
+          // Notify listeners without changing the audio source
+          notifyListeners();
+          return; // Don't re-initialize the audio player
         }
       }
-      // New song; initialize playback
+
+      // If it's a new song or the source is different, initialize the new song
       debugPrint("New audio source detected. Initializing playback.");
       isChangingSong = true;
       position = Duration.zero;
@@ -576,7 +616,6 @@ class AudioProvider with ChangeNotifier {
       }
 
       Uri? artUri = _createArtUri(albumArtPath);
-
       _currentMediaItem = MediaItem(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         album: newArtist,
@@ -584,9 +623,15 @@ class AudioProvider with ChangeNotifier {
         artUri: artUri,
       );
 
+      // Create proper URI for both file paths and URLs
+      final Uri audioUri =
+          !audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')
+              ? Uri.file(audioUrl)
+              : Uri.parse(audioUrl);
+
       await _audioPlayer.setAudioSource(
         AudioSource.uri(
-          Uri.parse(audioUrl),
+          audioUri,
           tag: _currentMediaItem,
         ),
       );
@@ -603,8 +648,11 @@ class AudioProvider with ChangeNotifier {
       notifyListeners();
     }
 
-    // Reset related songs if needed
     resetRelatedSongs();
+  }
+
+  Future<bool> checkSongLikeStatus(String title, String artist) async {
+    return await _storageService.isSongLiked(title, artist);
   }
 
   Uri? _createArtUri(String albumArtPath) {
